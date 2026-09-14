@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-13",
+  "profiles": [
+    {
+      "fov_mm": [
+        180.0,
+        192.0
+      ],
+      "thickness_mm": 3.0,
+      "r_value": 60.0,
+      "beta": 0.5,
+      "id": "p3mm",
+      "scan_ids": [
+        "MID112",
+        "MID114"
+      ],
+      "native_shape": [
+        60,
+        64
+      ],
+      "sequence": "%CustomerSeq%\\esaszz_xSPEN_180c180c_bipolarDiff",
+      "views": [
+        "axial",
+        "sagittal"
+      ],
+      "grids": [
+        {
+          "id": "mm4",
+          "shape": [
+            46,
+            48
+          ],
+          "pixel_mm": [
+            3.9130434782608696,
+            4.0
+          ],
+          "acquired_native": false
+        },
+        {
+          "id": "mm3",
+          "shape": [
+            60,
+            64
+          ],
+          "pixel_mm": [
+            3.0,
+            3.0
+          ],
+          "acquired_native": true
+        },
+        {
+          "id": "mm2",
+          "shape": [
+            90,
+            96
+          ],
+          "pixel_mm": [
+            2.0,
+            2.0
+          ],
+          "acquired_native": false
+        },
+        {
+          "id": "mm1p5",
+          "shape": [
+            120,
+            128
+          ],
+          "pixel_mm": [
+            1.5,
+            1.5
+          ],
+          "acquired_native": false
+        }
+      ]
+    },
+    {
+      "fov_mm": [
+        184.9583333,
+        193.0
+      ],
+      "thickness_mm": 4.0,
+      "r_value": 46.0,
+      "beta": 0.5,
+      "id": "p4mm",
+      "scan_ids": [
+        "MID27"
+      ],
+      "native_shape": [
+        46,
+        48
+      ],
+      "sequence": "%CustomerSeq%\\esaszz_xSPEN_180c180c_bipolarDiff",
+      "views": [
+        "axial",
+        "sagittal"
+      ],
+      "grids": [
+        {
+          "id": "mm4",
+          "shape": [
+            46,
+            48
+          ],
+          "pixel_mm": [
+            4.020833332608696,
+            4.020833333333333
+          ],
+          "acquired_native": true
+        },
+        {
+          "id": "mm3",
+          "shape": [
+            62,
+            64
+          ],
+          "pixel_mm": [
+            2.983198924193548,
+            3.015625
+          ],
+          "acquired_native": false
+        },
+        {
+          "id": "mm2",
+          "shape": [
+            92,
+            96
+          ],
+          "pixel_mm": [
+            2.010416666304348,
+            2.0104166666666665
+          ],
+          "acquired_native": false
+        },
+        {
+          "id": "mm1p5",
+          "shape": [
+            124,
+            128
+          ],
+          "pixel_mm": [
+            1.491599462096774,
+            1.5078125
+          ],
+          "acquired_native": false
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Two geometry protocols of one crossed-chirp bipolarDiff sequence family; not two distinct sequences.",
+    "The four grids are simulation/prior/output grids. Only acquired_native=true corresponds to the selected real acquisition matrix. Grid spacing does not establish achieved spatial resolution.",
+    "Each profile retains measured slice thickness at every in-plane grid; mm labels refer to approximate in-plane spacing, not isotropic resolution.",
+    "IXI axial and sagittal training views are both included per profile; this does not establish measured sagittal p4mm support in the selected scan set.",
+    "b600/b1000 are nominal protocol labels; raw repeat-to-b0/direction mapping has not been independently validated.",
+    "r_value is a chirp/encoding parameter, not retrospective acceleration factor."
+  ]
+}

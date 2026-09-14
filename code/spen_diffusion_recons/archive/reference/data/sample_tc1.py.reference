@@ -1,0 +1,108 @@
+"""Reproducible, visually reviewed 70-subject-stratified TC1 coronal previews.
+Source images are never changed. Preview processing is linear spatial interpolation,
+manual rectangular brain ROI, zero square padding and aspect-preserving downsampling.
+"""
+import argparse
+from concurrent.futures import ThreadPoolExecutor
+import json, math
+from pathlib import Path
+import nibabel as nib
+import numpy as np
+from scipy.ndimage import map_coordinates, rotate
+from PIL import Image, ImageDraw, ImageFont
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE/'sources/figshare_tc1_wt_3258139'
+OUT = HERE/'sample100_coronal_20260914/tc1'
+FONT = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 15)
+SMALL = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 11)
+SEED = 20260914
+
+def select():
+    rng = np.random.default_rng(SEED)
+    paths = sorted(ROOT.glob('C1/*.nii.gz'))+sorted(ROOT.glob('C2/*.nii.gz'))
+    assert len(paths)==55
+    rows=[]; used=set()
+    extras=rng.choice(len(paths),15,replace=False).tolist()
+    for pidx in list(range(len(paths)))+extras:
+        p=paths[pidx]; img=nib.load(p); cohort=p.parent.name
+        lo=math.ceil((.3 if cohort=='C1' else .5)*img.shape[0]); hi=math.ceil(.6*img.shape[0])
+        choices=[i for i in range(lo,hi) if (str(p),i) not in used]
+        index=int(rng.choice(choices)); used.add((str(p),index))
+        rows.append(dict(sample_id=f'tc1_{len(rows)+1:03d}',subject=p.name.removesuffix('.nii.gz'),source='figshare_tc1_wt_3258139',source_file=str(p),source_axis=0,source_index=index,initial_source_index=index,cohort=cohort,source_shape=list(img.shape),source_spacing_mm=list(map(float,img.header.get_zooms()[:3])),selection_window=[lo,hi],replacement_reason=None))
+    return rows
+
+def prepare_subject(items):
+    p=Path(items[0]['source_file']); img=nib.load(p); data=img.get_fdata(dtype=np.float32)
+    for row in items:
+        coord=(np.array(data.shape)-1)/2; coord[0]=row['source_index']
+        center=nib.affines.apply_affine(img.affine,coord)
+        size=384; spacing=.04
+        z,x=np.meshgrid(-(np.arange(size)-(size-1)/2)*spacing,-(np.arange(size)-(size-1)/2)*spacing,indexing='ij')
+        world=np.stack([x+center[0],np.full_like(x,center[1]),z+center[2]],-1)
+        coordinates=nib.affines.apply_affine(np.linalg.inv(img.affine),world).reshape(-1,3).T
+        plane=map_coordinates(data,coordinates,order=1,mode='constant',cval=0,prefilter=False).reshape(size,size)
+        np.save(OUT/'candidates'/f"{row['sample_id']}.npy",plane)
+        row['plane_center_world_ras_mm']=center.tolist()
+        row['source_affine']=img.affine.tolist()
+    print(f'prepared {p.name}: {len(items)}',flush=True)
+    return items
+
+def shown(a,upper=None):
+    if upper is None: upper=float(np.percentile(a[a>0],99.5))
+    return Image.fromarray(np.uint8(np.clip(a/max(upper,1e-9),0,1)*255)),upper
+
+def pages(rows,kind):
+    cols=3; tile=384 if kind=='candidates' else 256; perpage=12 if kind=='candidates' else 20
+    for start in range(0,len(rows),perpage):
+        batch=rows[start:start+perpage]; nrow=math.ceil(len(batch)/cols)
+        sheet=Image.new('RGB',(cols*tile,nrow*(tile+42)), '#eeeeee'); d=ImageDraw.Draw(sheet)
+        for k,row in enumerate(batch):
+            x0=(k%cols)*tile; y0=(k//cols)*(tile+42)
+            d.text((x0+8,y0+3),f"{row['sample_id']} {row['cohort']} {row['subject']}",font=SMALL,fill='black')
+            d.text((x0+8,y0+20),f"AP {row['source_index']}/{row['source_shape'][0]}",font=SMALL,fill='black')
+            if kind=='candidates':
+                a=np.load(OUT/'candidates'/f"{row['sample_id']}.npy"); im,_=shown(a); im=im.convert('RGB'); di=ImageDraw.Draw(im)
+                for q in range(32,384,32):
+                    di.line((q,0,q,383),fill='#655000'); di.line((0,q,383,q),fill='#655000')
+                    if q%64==0:
+                        di.text((q+1,1),str(q),font=SMALL,fill='yellow'); di.text((1,q+1),str(q),font=SMALL,fill='yellow')
+            else:
+                im=Image.open(OUT/row['image_192']).convert('RGB').resize((tile,tile),Image.Resampling.NEAREST)
+            sheet.paste(im,(x0,y0+42))
+        sheet.save(OUT/f'{kind}_page_{start//perpage+1:02d}.jpg',quality=96)
+
+def prepare():
+    (OUT/'candidates').mkdir(parents=True,exist_ok=True)
+    rows=select(); groups={}
+    for row in rows: groups.setdefault(row['source_file'],[]).append(row)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for _ in pool.map(prepare_subject,groups.values()):pass
+    (OUT/'candidate_selection.json').write_text(json.dumps({'seed':SEED,'records':rows},indent=2)+'\n')
+    pages(rows,'candidates')
+
+def export():
+    rows=json.loads((OUT/'candidate_selection.json').read_text())['records']
+    qc=json.loads((OUT/'manual_qc.json').read_text())
+    (OUT/'images').mkdir(exist_ok=True); (OUT/'native_roi').mkdir(exist_ok=True)
+    for row in rows:
+        q=qc[row['sample_id']]; a=np.load(OUT/'candidates'/f"{row['sample_id']}.npy")
+        angle=q.get('angle_deg_ccw',0)
+        if angle:a=rotate(a,angle,reshape=False,order=1,mode='constant',cval=0,prefilter=False)
+        x0,y0,x1,y1=q['crop_xyxy']; roi=a[y0:y1,x0:x1]; h,w=roi.shape; side=max(h,w)
+        assert side>=192
+        top=(side-h)//2; bottom=side-h-top; left=(side-w)//2; right=side-w-left
+        row['native_roi']=f"native_roi/{row['sample_id']}.npy"; np.save(OUT/row['native_roi'],roi)
+        padded=np.pad(roi,((top,bottom),(left,right)),constant_values=0)
+        im,upper=shown(padded,upper=float(np.percentile(roi[roi>0],99.5)))
+        im=im.resize((192,192),Image.Resampling.BOX)
+        row['image_192']=f"images/{row['sample_id']}.png"; im.save(OUT/row['image_192'])
+        row['transforms']=dict(world_plane='constant RAS anterior-posterior coordinate through source-axis0 anchor; superior up, R to viewer left',plane_pixel_spacing_mm=.04,plane_shape=[384,384],volume_interpolation='linear',angle_deg_ccw=angle,rotation_interpolation='linear' if angle else None,crop_xyxy=q['crop_xyxy'],real_roi_shape=[h,w],square_side=side,padding_top_bottom_left_right=[top,bottom,left,right],padding_fraction=1-h*w/side**2,output_shape=[192,192],scale=192/side,no_upscale=True,display_window=[0,upper],display_quantile_positive=99.5,downsample='BOX area average',denoise=False,sharpen=False)
+        row['visual_qc']=dict(reviewed=True,note=q.get('note','Complete brain retained with small surrounding margin; no skull stripping.'))
+    result=dict(seed=SEED,status='70 visually reviewed coronal preview samples',records=rows,source_volumes=55,selection='All 55 animals once, plus 15 distinct-animal extra layers; fixed random seed; one coronal window only',raw_modified=False,training_export=False,limitation='Manual rectangular ROI preserves surrounding nonbrain tissue where needed to avoid clipping cortex; brain-only segmentation has not been applied. PNGs use per-image display scaling; float ROI retains MRI intensities.')
+    (OUT/'manifest.json').write_text(json.dumps(result,indent=2)+'\n'); pages(rows,'review')
+    print(json.dumps(dict(exported=len(rows),subjects=len(set(r['subject'] for r in rows)),min_real_roi_side=min(max(r['transforms']['real_roi_shape']) for r in rows))),flush=True)
+
+if __name__=='__main__':
+    ap=argparse.ArgumentParser(); ap.add_argument('mode',choices=['prepare','export']); args=ap.parse_args()
+    prepare() if args.mode=='prepare' else export()

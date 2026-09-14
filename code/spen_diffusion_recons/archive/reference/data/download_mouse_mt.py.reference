@@ -1,0 +1,456 @@
+"""Download the 20-subject T2/MT subset of Zenodo 5834507 using ZIP ranges.
+
+Original Analyze pairs are preserved byte-for-byte. Published spatial grids have
+been registered/interpolated; acquisition was 100 um isotropic. These are an
+auxiliary contrast dataset, not a new native 60/62.5 um HR dataset.
+Requires requests and numpy. Re-running verifies completed files and resumes
+compressed partial members. Each extracted member must match its ZIP CRC32.
+"""
+import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+import hashlib
+import io
+import json
+import math
+import os
+from pathlib import Path, PurePosixPath
+import struct
+import time
+import zipfile
+import zlib
+
+import numpy as np
+import requests
+
+HERE = Path(__file__).resolve().parent
+OUT = HERE / 'sources' / 'zenodo5834507'
+API = 'https://zenodo.org/api/records/5834507'
+METHODS = 'https://datadryad.org/dataset/doi:10.5061/dryad.1vhhmgqv8'
+ARCHIVES = ('MRI_C57_data.zip', 'MRI_Shiverer.zip')
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def write_json(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + '.tmp')
+    tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
+    os.replace(tmp, path)
+
+
+def hashes(path):
+    sha, crc, n = hashlib.sha256(), 0, 0
+    with path.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(4 * 1024 * 1024), b''):
+            n += len(chunk)
+            sha.update(chunk)
+            crc = zlib.crc32(chunk, crc)
+    return {'sha256': sha.hexdigest(), 'crc32': f'{crc:08x}', 'bytes': n}
+
+
+def request_range(url, start, end, total, stream=False):
+    request_url = url + ('&' if '?' in url else '?') + 'download=1'
+    r = requests.get(request_url, headers={'Range': f'bytes={start}-{end}',
+                                  'Accept-Encoding': 'identity'},
+                     timeout=(30, 90), stream=stream)
+    expected = f'bytes {start}-{end}/{total}'
+    if r.status_code != 206 or r.headers.get('Content-Range') != expected:
+        detail = f'{r.status_code} {r.headers.get("Content-Range")} expected {expected}'
+        r.close()
+        raise ValueError('Unexpected HTTP range response: ' + detail)
+    return r
+
+
+class RemoteZip(io.RawIOBase):
+    """Seekable small-range reader for ZIP/ZIP64 central directory indexing."""
+    def __init__(self, url, size):
+        self.url, self.size, self.position = url, size, 0
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        return self.position
+
+    def seek(self, offset, whence=0):
+        self.position = offset if whence == 0 else (
+            self.position + offset if whence == 1 else self.size + offset)
+        return self.position
+
+    def read(self, n=-1):
+        n = self.size - self.position if n < 0 else min(n, self.size - self.position)
+        if n == 0:
+            return b''
+        if n < 0 or n > 2 * 1024 * 1024:
+            raise ValueError('Unexpected ZIP index read size: ' + str(n))
+        for attempt in range(6):
+            try:
+                with request_range(self.url, self.position, self.position + n - 1,
+                                   self.size) as r:
+                    content = r.content
+                if len(content) != n:
+                    raise ValueError('Truncated ZIP index read')
+                self.position += n
+                return content
+            except Exception as error:
+                print(json.dumps({'event': 'range_retry', 'url': self.url,
+                                  'position': self.position, 'bytes': n,
+                                  'attempt': attempt + 1, 'error': str(error)}), flush=True)
+                if attempt == 5:
+                    raise
+                time.sleep(min(2 ** attempt, 15))
+
+
+def selection_reason(name):
+    s = name.lower()
+    if s.endswith('/'):
+        return False, 'directory'
+    if 't2mtonoff' in s and '_jz' in s:
+        return False, 'same-subject C1 JZ variant; do not count as an additional scan'
+    if s.endswith(('.hdr', '.img')) and 't2mtonoff' in s:
+        return True, 'one original published three-channel T2/MT Analyze pair per subject'
+    if s.endswith(('.hdr', '.img')) and 'masked_outline' in s:
+        return True, 'published corresponding brain mask for later QC'
+    return False, 'outside requested T2/MT image and mask subset (diffusion/derived/other)'
+
+
+def download_member(row):
+    relative = PurePosixPath(row['member'])
+    if relative.is_absolute() or '..' in relative.parts:
+        raise ValueError('Unsafe ZIP path')
+    target = OUT / 'images' / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    record_path = OUT / 'download_records' / (hashlib.sha256(row['member'].encode()).hexdigest() + '.json')
+    if target.exists():
+        check = hashes(target)
+        if check['bytes'] != row['uncompressed_bytes'] or check['crc32'] != row['zip_crc32']:
+            raise ValueError('Existing final file fails ZIP CRC/size: ' + str(target))
+        previous = json.loads(record_path.read_text()) if record_path.exists() else {}
+        record = {**previous, **row, **check, 'crc_verified': True,
+                  'local_path': str(target.resolve()), 'verified_at': now()}
+        write_json(record_path, record)
+        return record
+
+    # A local ZIP header gives exact start of the compressed member payload.
+    remote = RemoteZip(row['archive_url'], row['archive_bytes'])
+    remote.seek(row['header_offset'])
+    # All selected archive paths are ASCII; combine fixed header and filename
+    # into one small request because per-request latency is substantial.
+    expected_name = row['member'].encode('ascii')
+    header_and_name = remote.read(30 + len(expected_name))
+    fields = struct.unpack('<4s5H3I2H', header_and_name[:30])
+    if fields[0] != b'PK\x03\x04' or fields[2] & 1:
+        raise ValueError('Invalid/encrypted ZIP member')
+    filename_length, extra_length = fields[-2:]
+    remote_name = header_and_name[30:]
+    codec = 'utf-8' if fields[2] & 0x800 else 'cp437'
+    if filename_length != len(expected_name) or remote_name.decode(codec) != row['member'] or fields[3] != row['compression_type']:
+        raise ValueError('ZIP local/central header mismatch')
+    start = row['header_offset'] + 30 + filename_length + extra_length
+    end = start + row['compressed_bytes'] - 1
+    compressed = target.with_name(target.name + '.compressed.partial')
+    for attempt in range(6):
+        try:
+            have = compressed.stat().st_size if compressed.exists() else 0
+            if have > row['compressed_bytes']:
+                raise ValueError('Oversized compressed partial')
+            if have < row['compressed_bytes']:
+                with request_range(row['archive_url'], start + have, end,
+                                   row['archive_bytes'], stream=True) as response:
+                    with compressed.open('ab') as stream:
+                        for block in response.iter_content(1024 * 1024):
+                            if block:
+                                if stream.tell() + len(block) > row['compressed_bytes']:
+                                    raise ValueError('Oversized HTTP body')
+                                stream.write(block)
+            if compressed.stat().st_size != row['compressed_bytes']:
+                raise ValueError('Compressed member download incomplete')
+            break
+        except Exception as error:
+            print(json.dumps({'event': 'retry', 'member': row['member'],
+                              'attempt': attempt + 1, 'error': str(error)}), flush=True)
+            if attempt == 5:
+                raise
+            time.sleep(min(2 ** attempt, 20))
+
+    tmp = target.with_name(target.name + '.partial')
+    decoder = zlib.decompressobj(-15) if row['compression_type'] == 8 else None
+    if row['compression_type'] not in (0, 8):
+        raise ValueError('Unsupported ZIP compression')
+    with compressed.open('rb') as src, tmp.open('wb') as dest:
+        for block in iter(lambda: src.read(1024 * 1024), b''):
+            dest.write(decoder.decompress(block) if decoder else block)
+        if decoder:
+            dest.write(decoder.flush())
+            if not decoder.eof or decoder.unused_data:
+                raise ValueError('Invalid deflate member termination')
+    check = hashes(tmp)
+    if check['bytes'] != row['uncompressed_bytes'] or check['crc32'] != row['zip_crc32']:
+        raise ValueError('Extracted member ZIP CRC/size mismatch: ' + row['member'])
+    os.replace(tmp, target)
+    compressed.unlink()
+    record = dict(row, **check, crc_verified=True, payload_byte_range=[start, end],
+                  http_request_url=row['archive_url'] + '?download=1',
+                  local_path=str(target.resolve()), verified_at=now())
+    write_json(record_path, record)
+    print(json.dumps({'event': 'verified', 'member': row['member'], 'bytes': check['bytes']}), flush=True)
+    return record
+
+
+def audit_pair(hdr):
+    h = hdr.read_bytes()
+    if len(h) != 348:
+        raise ValueError('Unexpected Analyze header length')
+    endian = '<' if struct.unpack_from('<i', h)[0] == 348 else '>'
+    if struct.unpack_from(endian + 'i', h)[0] != 348:
+        raise ValueError('Not an Analyze/NIfTI-1 header')
+    dims = struct.unpack_from(endian + '8h', h, 40)
+    shape = list(dims[1:1 + dims[0]])
+    if not shape or not all(n > 0 for n in shape):
+        raise ValueError('Invalid image dimensions')
+    code, bitpix = struct.unpack_from(endian + '2h', h, 70)
+    codes = {2: 'u1', 4: 'i2', 8: 'i4', 16: 'f4', 64: 'f8', 512: 'u2', 768: 'u4'}
+    dtype = np.dtype(endian + codes[code])
+    img = hdr.with_suffix('.img')
+    if bitpix != dtype.itemsize * 8 or img.stat().st_size != math.prod(shape) * dtype.itemsize:
+        raise ValueError('Image payload size/dtype mismatch: ' + str(img))
+    values = np.memmap(img, dtype=dtype, mode='r', shape=tuple(shape), order='F')
+    if not np.isfinite(values).all() or not np.any(values != 0):
+        raise ValueError('Non-finite/all-zero image')
+    spacing = list(struct.unpack_from(endian + '8f', h, 76)[1:4])
+    units_text = h[56:60].split(b'\x00', 1)[0].decode('ascii', errors='replace')
+    is_image = 't2mtonoff' in hdr.name.lower()
+    result = {
+        'hdr_path': str(hdr.resolve()), 'img_path': str(img.resolve()),
+        'subject_id': hdr.parent.name, 'shape': shape, 'spatial_shape': shape[:3], 'datatype': code,
+        'bitpix': bitpix, 'pixdim_raw': spacing,
+        'analyze_vox_units_bytes_hex': h[56:60].hex(),
+        'analyze_vox_units_declared': units_text,
+        'spatial_calibration_status': 'unconfirmed; record original Analyze units and pixdim without treating them as native acquisition spacing',
+        'native_spacing_mm_from_source_methods': [0.1, 0.1, 0.1],
+        'published_grid_status': 'registered/interpolated; original header preserved',
+        'all_finite': True, 'value_min': float(values.min()), 'value_max': float(values.max()),
+        'negative_voxel_count': int(np.count_nonzero(values < 0)),
+        'role': 'auxiliary_multicontrast' if is_image else 'brain_mask',
+    }
+    if is_image:
+        if len(shape) != 4 or shape[-1] != 3:
+            raise ValueError('Expected exactly three contrast channels')
+        result['channel_order'] = 'unverified: source describes T2 and MT on/off, no confirmed index assignment'
+        result['channels'] = [{'index': c, 'min': float(values[..., c].min()),
+                               'max': float(values[..., c].max()),
+                               'nonzero_voxels': int(np.count_nonzero(values[..., c]))}
+                              for c in range(3)]
+        if spacing == [1.0, 1.0, 1.0]:
+            result['header_warning'] = 'Header pixdim 1,1,1 conflicts with mouse dimensions and source methods even when Analyze vox_units declares mm; physical calibration remains unresolved. Do not use as native resolution.'
+        else:
+            result['header_warning'] = 'Header sampling describes released grid; does not establish native acquisition resolution.'
+    else:
+        if len(shape) == 4 and shape[-1] == 1:
+            mask_values = values[..., 0]
+            result['mask_header_note'] = 'Original 4D mask has one trailing singleton dimension; only the in-memory QC view is 3D. Header and file are unchanged.'
+        elif len(shape) == 3:
+            mask_values = values
+        else:
+            raise ValueError('Expected 3D mask or a 4D mask with one singleton frame')
+        result['nonzero_voxels'] = int(np.count_nonzero(values))
+        result['nonzero_planes_by_array_axis'] = [int(np.count_nonzero(np.any(mask_values != 0, axis=tuple(j for j in range(3) if j != i)))) for i in range(3)]
+    del values
+    return result
+
+
+def write_acceptance(provenance, audit):
+    """Small completion record for root-level aggregation; detail stays separate."""
+    if provenance['status'] != 'verified_complete' or audit['status'] != 'verified_complete':
+        raise ValueError('Cannot accept an incomplete download/audit')
+    result = {
+        'status': 'verified_complete', 'verified_at': now(),
+        'source_url': 'https://zenodo.org/records/5834507', 'license': 'CC0',
+        'summary': {
+            'animals': audit['animal_count'], 'multicontrast_4d_images': 20,
+            'channels_per_image': 3, 'brain_masks': 20, 'files': 80,
+            'bytes': provenance['downloaded_uncompressed_bytes'],
+            'selected_compressed_bytes': provenance['selected_compressed_bytes'],
+            'unique_4d_images_sha256': audit['unique_4d_image_sha256_count'],
+            'all_zip_member_crc32_verified': all(f['crc_verified'] for f in provenance['files']),
+            'all_files_sha256_recorded': all(len(f['sha256']) == 64 for f in provenance['files']),
+            'all_pixels_finite': all(p['all_finite'] for p in audit['pairs']),
+            'image_mask_header_spacing_mismatches': sum(p.get('image_mask_header_grid_match') is False for p in audit['pairs']),
+            'primary_hr_candidate': False,
+        },
+        'native_acquired_spacing_mm': [0.1, 0.1, 0.1],
+        'published_image_shape': [200, 280, 128, 3],
+        'coronal_plane_array_shape': [200, 128],
+        'role': 'auxiliary_multicontrast_registered_images',
+        'published_spatial_calibration': audit['published_grid'],
+        'channel_order': audit['channel_order'],
+        'user_positive_coronal_examples': 'coronal_acceptance.json',
+        'counting_note': 'C1 approved panels 1/2/3 represent three contrasts of one coronal plane; panel 5 repeats panel 1. No three-axis sample multiplication.',
+        'whole_zip_md5_verified': False,
+        'whole_zip_md5_note': 'Official ZIP MD5 preserved in provenance, but complete archives were not downloaded; ZIP member CRC32 verified instead.',
+        'details': {'download': 'download_provenance.json', 'headers_and_pixels': 'source_audit.json',
+                    'selection': 'zip_index_and_selection.json', 'readme': 'README_IMPORT.md'},
+    }
+    write_json(OUT / 'download_acceptance.json', result)
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--workers', type=int, default=6)
+    args = parser.parse_args()
+    OUT.mkdir(parents=True, exist_ok=True)
+    metadata_path = OUT / 'zenodo_record.json'
+    if metadata_path.exists():
+        record = json.loads(metadata_path.read_text())
+        print(json.dumps({'event': 'using_preserved_official_metadata'}), flush=True)
+    else:
+        for attempt in range(6):
+            try:
+                response = requests.get(API, timeout=(30, 90))
+                response.raise_for_status()
+                record = response.json()
+                write_json(metadata_path, record)
+                break
+            except Exception:
+                if attempt == 5:
+                    raise
+                time.sleep(min(2 ** attempt, 20))
+    if record['metadata']['license']['id'] != 'cc-zero':
+        raise ValueError('Expected CC0 license')
+    official = {f['key']: f for f in record['files']}
+    selected, complete_index, archive_records = [], [], []
+    index_path = OUT / 'zip_index_and_selection.json'
+    if index_path.exists():
+        saved = json.loads(index_path.read_text())
+        complete_index, archive_records = saved['entries'], saved['archives']
+        if {a['name'] for a in archive_records} != set(ARCHIVES):
+            raise ValueError('Cached archive set differs')
+        for a in archive_records:
+            if a['bytes'] != official[a['name']]['size'] or a['official_checksum'] != official[a['name']]['checksum']:
+                raise ValueError('Cached ZIP metadata differs from preserved official metadata')
+        selected = [r for r in complete_index if r['selected']]
+        print(json.dumps({'event': 'using_preserved_zip_directory'}), flush=True)
+    for archive in (() if complete_index else ARCHIVES):
+        f = official[archive]
+        url = f['links']['self']
+        print(json.dumps({'event': 'indexing_archive', 'archive': archive}), flush=True)
+        with zipfile.ZipFile(RemoteZip(url, f['size'])) as z:
+            for info in z.infolist():
+                take, reason = selection_reason(info.filename)
+                row = {'archive': archive, 'archive_url': url, 'archive_bytes': f['size'],
+                       'member': info.filename, 'compressed_bytes': info.compress_size,
+                       'uncompressed_bytes': info.file_size, 'zip_crc32': f'{info.CRC:08x}',
+                       'compression_type': info.compress_type, 'header_offset': info.header_offset,
+                       'selected': take, 'selection_reason': reason}
+                complete_index.append(row)
+                if take:
+                    selected.append(row)
+        print(json.dumps({'event': 'archive_indexed', 'archive': archive}), flush=True)
+        archive_records.append({'name': archive, 'url': url, 'bytes': f['size'],
+                                'official_checksum': f['checksum'],
+                                'whole_archive_checksum_verified': False,
+                                'reason': 'Only selected member byte ranges downloaded, not the complete ZIP'})
+    if len(selected) != 80:
+        raise ValueError('Expected 20 subjects times two Analyze pairs (80 files)')
+    write_json(OUT / 'zip_index_and_selection.json', {'indexed_at': now(), 'archives': archive_records,
+                                                   'entries': complete_index,
+                                                   'selected_compressed_bytes': sum(r['compressed_bytes'] for r in selected),
+                                                   'selected_uncompressed_bytes': sum(r['uncompressed_bytes'] for r in selected)})
+    readme = official['README.txt']
+    readme_path = OUT / 'README_source.txt'
+    if readme_path.exists():
+        readme_content = readme_path.read_bytes()
+    else:
+        for attempt in range(6):
+            try:
+                r = requests.get(readme['links']['self'], timeout=(30, 90))
+                r.raise_for_status()
+                readme_content = r.content
+                break
+            except Exception:
+                if attempt == 5:
+                    raise
+                time.sleep(min(2 ** attempt, 20))
+    if hashlib.md5(readme_content).hexdigest() != readme['checksum'].split(':', 1)[1]:
+        raise ValueError('Published README official MD5 mismatch')
+    readme_path.write_bytes(readme_content)
+    results, failures = [], []
+    with ThreadPoolExecutor(max_workers=max(1, min(8, args.workers))) as pool:
+        jobs = {pool.submit(download_member, row): row for row in selected}
+        for future in as_completed(jobs):
+            row = jobs[future]
+            try:
+                results.append(future.result())
+            except Exception as error:
+                failures.append({'member': row['member'], 'error': repr(error)})
+                print(json.dumps({'event': 'failed', **failures[-1]}), flush=True)
+    provenance = {'dataset_id': 'zenodo5834507', 'source_url': 'https://zenodo.org/records/5834507',
+                  'methods_url': METHODS, 'license': 'CC0', 'completed_at': now(),
+                  'status': 'failed' if failures else 'verified_complete', 'archives': archive_records,
+                  'source_readme': dict(url=readme['links']['self'], official_md5=readme['checksum'],
+                                        official_md5_verified=True, **hashes(OUT / 'README_source.txt')),
+                  'selected_member_count': len(selected), 'verified_member_count': len(results),
+                  'selected_compressed_bytes': sum(r['compressed_bytes'] for r in selected),
+                  'downloaded_uncompressed_bytes': sum(r['bytes'] for r in results),
+                  'files': sorted(results, key=lambda r: r['member']), 'failures': failures}
+    write_json(OUT / 'download_provenance.json', provenance)
+    if failures:
+        raise RuntimeError(f'{len(failures)} members failed; rerun to resume')
+    pairs = [audit_pair(Path(r['local_path'])) for r in results if r['member'].lower().endswith('.hdr')]
+    images = [r for r in pairs if r['role'] == 'auxiliary_multicontrast']
+    masks = [r for r in pairs if r['role'] == 'brain_mask']
+    if len(images) != 20 or len(masks) != 20:
+        raise ValueError('Expected 20 multicontrast image pairs and 20 mask pairs')
+    for item in images:
+        paired = [m for m in masks if Path(m['hdr_path']).parent == Path(item['hdr_path']).parent]
+        if len(paired) != 1 or paired[0]['spatial_shape'] != item['shape'][:3]:
+            raise ValueError('Image/mask shape mismatch')
+        item['paired_mask_hdr'] = paired[0]['hdr_path']
+        item['paired_mask_pixdim_raw'] = paired[0]['pixdim_raw']
+        item['image_mask_header_grid_match'] = item['pixdim_raw'] == paired[0]['pixdim_raw']
+    image_digests = [r['sha256'] for r in results if r['member'].lower().endswith('.img') and 't2mtonoff' in r['member'].lower()]
+    audit = {'status': 'verified_complete', 'completed_at': now(), 'animal_count': 20,
+             'multicontrast_4d_image_count': 20, 'channels_per_image': 3, 'mask_count': 20,
+             'unique_4d_image_sha256_count': len(set(image_digests)),
+             'native_sampling_mm': [0.1, 0.1, 0.1], 'native_sampling_basis': METHODS,
+             'published_grid': 'Source says 0.06mm interpolation; sampled Shiverer headers are 0.0625, C57 headers are 1,1,1. C1 Analyze vox_units declares mm but physical calibration is inconsistent and unresolved.',
+             'role': 'auxiliary_multicontrast_registered_images', 'contributes_to_native_high_resolution_main_count': False,
+             'channel_order': 'unverified; retain indexes 0,1,2',
+             'coronal_selection_note': 'C1 visual QC identifies array axis 1 as a compact complete coronal brain view; batch orientation, left/right direction, and physical calibration still require confirmation. Do not combine three axes for sample counts.',
+             'original_headers_modified': False, 'pairs': sorted(pairs, key=lambda r: r['hdr_path'])}
+    write_json(OUT / 'source_audit.json', audit)
+    (OUT / 'README_IMPORT.md').write_text('''# 小鼠 T2 / MT 辅助图像：Zenodo 5834507
+
+已下载20只离体小鼠：正常C57BL/6 10只，shiverer 5只及其对照5只。每只保留原始发布的三通道Analyze图像及brain mask，共80个.hdr/.img文件；不含组织学、DWI和重复C1 JZ版本。来源描述三个通道为T2与MT on/off，但尚未独立确认通道索引对应关系，因此保持channel 0/1/2。
+
+原始采集为100µm各向同性，发布前已插值并配准到Allen空间。Methods称插值到60µm；Shiverer头实为0.0625，C57头实为1,1,1。完整C1头的Analyze vox_units声明mm，但1mm与鼠脑尺寸及源方法矛盾，真实空间标定仍未确认。保留原始文件，不改header，不将这些数字自动当作有效物理分辨率或原生分辨率。该源作为多对比辅助数据，不计入40µm等主HR样本数量；三个通道也不当作三个独立动物/解剖层。发布的浮点图像含负值，保留原样，统计见source_audit.json。
+
+全体20个mask均为200×280×128×1，尾部是单例维度，审计仅在内存中按3D视图核验，没有改文件。19个mask头写0.0625mm、1个写1mm；9对图像/mask的header格距不同，但数组尺寸相同。后续应核实空间解释，不应盲按这些header进行物理重采样。
+
+后续切片遵循紧凑完整的冠状鼠脑构图。C1样本视觉QC显示array axis 1为合适冠状视角；全队列方向、左右方向和物理标定仍需核实。C1_orientation_qc.png上排为同一冠状位的三个原始通道，下排三视图仅用于方向核对，禁止三方向相加凑样本数。可用 `python preview_mouse_mt.py` 重现此预览（需matplotlib）。
+
+用户已认可预览第1、2、3、5幅的冠状构图。其中第5幅与第1幅是同一C1、同一原始层、同一channel 0的重复展示；只代表1个解剖层的3个对比度，不新增独立样本。正例及原始文件SHA256记录在coronal_acceptance.json。构图认可不改变该源100µm原采样、辅助角色。
+
+仅HTTP Range下载所选ZIP成员，逐成员验证ZIP CRC32及长度，并保存各文件SHA256。完整ZIP未下载，官方完整ZIP MD5已记录但不能声称验证通过。README_source.txt另按官方MD5验收。相同mask不代表新的图像数据；保持同动物、所有通道在同一划分。
+
+- 数据：https://zenodo.org/records/5834507
+- 方法：https://datadryad.org/dataset/doi:10.5061/dryad.1vhhmgqv8
+- 许可证：CC0（原记录API附存zenodo_record.json）。
+- 复现：在data_expansion目录运行 `python download_mouse_mt.py --workers 6`。
+- 下载验收：download_provenance.json，逐项记录：download_records/。
+- ZIP完整成员清单及选/排除理由：zip_index_and_selection.json。
+- 原始header、像素有限性/范围和mask检查：source_audit.json。
+''')
+    write_acceptance(provenance, audit)
+    print(json.dumps({'event': 'complete', 'animal_count': 20, 'member_count': len(results),
+                      'selected_compressed_bytes': provenance['selected_compressed_bytes'],
+                      'uncompressed_bytes': provenance['downloaded_uncompressed_bytes'],
+                      'unique_image_count': len(set(image_digests))}), flush=True)
+
+
+if __name__ == '__main__':
+    main()

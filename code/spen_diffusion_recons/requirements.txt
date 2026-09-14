@@ -1,0 +1,9 @@
+# Install the sibling spenpy project separately in a fresh environment.
+numpy>=1.24
+torch>=2.2
+scipy>=1.10
+Pillow>=9
+matplotlib>=3.7
+nibabel>=5
+tqdm>=4.65
+pytest>=7

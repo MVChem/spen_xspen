@@ -1,0 +1,10 @@
+# Install alongside -e ../spenpy[io,recon,dev] in the shared root .venv.
+# Select a torch build compatible with the intended CPU/CUDA runtime.
+torch>=2.0
+numpy
+scipy
+matplotlib
+h5py
+nibabel
+twixtools
+Pillow

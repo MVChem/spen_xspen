@@ -1,0 +1,624 @@
+function [images,Imag_origin,Imag_low,SPEN_AZ,details]= export_original_PV5(fid_dir,traj_dir)
+
+DebugShow=false;
+
+PhaseArrayProc_mode=0; %%PhaseArrayProc_mode=0,average in FID; PhaseArrayProc_mode=1,phase correction of each Phase array;   PhaseArrayProc_mode=2, magnitue average;
+ProcessWithPrePhaseCorr=1;%% usually invivo we need to do pre phase correction to suppress the motion phase between shots(1);  0 for exvivo NO need;
+SmoothMotionPhaseBetweenShots=0; %% usually invivo we need to use to improve the result ;  0 for exvivo NO need;
+bAMPCorrect=0;
+
+bSelectedPhaseCorrRegion=false; %% sometimes the automatic Mask region select is not so good that you need to selet you region
+PhaseCorrRegionNum=1;
+
+bUseMask=false;
+AssumNoiseLength=1/14;
+Std2NoiseThreshFactor = 4;
+
+bShowImaging=false;
+
+% fid_dir=inputArg1;
+
+% Imag_dir=[fid_dir  'pdata' filesep '1' filesep ];
+
+ImagDimsion = ReadPVParam(fid_dir, 'PVM_SpatDimEnum') ;
+methodName = ReadPVParam(fid_dir, 'Method') ;
+
+NSegments= ReadPVParam(fid_dir, 'NSegments') ;
+% EpiTrajAdjkx = ReadPVParam(traj_dir, 'PVM_EpiTrajAdjkx') ;
+% RampLengthReadings = ReadPVParam(fid_dir, 'RECO_spen_RampLengthReadings') ; % the signal along the ramps will be set to zero.
+bMultiSlice=ReadPVParam(fid_dir, 'bMultiSlice') ;
+
+Rvalue=ReadPVParam(fid_dir, 'Rvalue') ;
+SpatEncBW=ReadPVParam(fid_dir, 'SpatEncBW') ;
+EncNReceivers =ReadPVParam(fid_dir, 'PVM_EncNReceivers') ;
+
+
+FOV=ReadPVParam(fid_dir, 'PVM_Fov');
+FOV=FOV/10;
+lro=FOV(1);
+lpe=FOV(2);
+gammaHz = 4.2574e+3 ; % [Hz/G]
+Ge               = ReadPVParam(fid_dir, 'Gchirp');               % in % of PVM_GradCalConst, excitation gradient along y-direction for spatial encoding
+PVM_GradCalConst = ReadPVParam(fid_dir, 'PVM_GradCalConst'); % in Hz/mm
+% GPEe             = Ge/10*PVM_GradCalConst*(1/gammaHz);         % in  G/cm
+GPEe = ReadPVParam(fid_dir, 'SpenGyGaussStren') ; % [G/cm]16
+% GPEe = 0.4835 ; % SPEN
+
+LPE = lpe ; % [cm]
+SE_flag = 1 ;
+if( strcmp(bMultiSlice,'no') && strcmp(methodName,'spen'))
+    SE_flag = 2 ;
+end
+
+LRO=lro;
+ky1RelativePos=0;
+GaussRelativeWidth=0.8;
+
+
+NumShots=NSegments;
+ProcparStruct.nseg=NumShots;
+
+% a_rad2cmsqr is the 2nd order coefficient of the parabolic phase: [rad/cm^2]
+
+ProcparStruct.Tp=ReadPVParam(fid_dir, 'SpatEncDuration');
+ProcparStruct.Tp=ProcparStruct.Tp/1000;
+
+% [kField]= ReadBrukerkSpace_PV6(fid_dir);  % read fid data to kField, than We need to reshape it
+% [kField]= ReadBrukerkSpace_PV6_fid(fid_dir);  % read fid data to kField, than We need to reshape it
+SpatDimEnum=ReadPVParam(fid_dir, 'PVM_SpatDimEnum') ;
+if strcmp(SpatDimEnum,'<3d>') ==1
+    [kField]= ReadBrukerkSpace_PV6_fid_multichannel_3D(fid_dir);  % read fid data to kField, than We need to reshape it
+    %% Phase rotate to account for slice offset
+    % calculate additional variables
+    dims=[size(kField,1), size(kField,2), size(kField,3), size(kField,4)];
+    Offset_in_mm=ReadPVParam(fid_dir, 'PVM_EffSliceOffset') ;
+    Matrix=ReadPVParam(fid_dir, 'PVM_Matrix');
+    Offset_in_pixel = zeros(4,1);
+    Offset_in_pixel(3,1) =floor(Offset_in_mm/(FOV(1,3)*10).*((Matrix(1,3))));
+    % start process
+    for s5 = 1:size(kField,5)
+        for s6 = 1:size(kField,6)
+            kFieldTemp = squeeze(kField(:,:,:,:,s5,s6));
+            phase_matrix=ones(size(kFieldTemp));
+            for index=1:length(size(kFieldTemp))
+                f=0:1/(dims(index)):1-(1/(dims(index)));
+                phase_vektor=exp(1i*2*pi*Offset_in_pixel(index,1)*f);
+                switch index
+                    case 1
+                        phase_matrix=phase_matrix.*repmat(phase_vektor', [1, dims(2), dims(3), dims(4)]);
+                    case 2
+                        phase_matrix=phase_matrix.*repmat(phase_vektor, [dims(1), 1, dims(3), dims(4)]);
+                    case 3
+                        tmp(1,1,:)=phase_vektor;
+                        phase_matrix=phase_matrix.*repmat(tmp, [dims(1), dims(2), 1, dims(4)]);
+                    case 4
+                        tmp(1,1,1,:)=phase_vektor;
+                        phase_matrix=phase_matrix.*repmat(tmp, [dims(1), dims(2), dims(3), 1]);
+                end
+                clear phase_vekor f tmp
+            end
+            kField(:,:,:,:,s5,s6)=kFieldTemp.*phase_matrix;
+            clearvars kFieldTemp phase_matrix
+        end
+    end
+    %% end of phase rotate
+    kField = FFTKSpace2XSpace(kField,3);
+    kField = flip(kField,3);
+else
+    [kField]= ReadBrukerkSpace_PV6_fid_multichannel(fid_dir);  % read fid data to kField, than We need to reshape it
+end
+
+figure;imagesc(squeeze(abs(FFTKSpace2XSpace(kField(:,:,1,1,1,1),1))))
+
+MatrixSize = ReadPVParam(fid_dir, 'PVM_Matrix') ;
+if length(MatrixSize)==2
+    kFieldRegrid = zeros(MatrixSize(1,1),MatrixSize(1,2),size(kField,3),size(kField,4),size(kField,5),size(kField,6),'single');
+else
+    kFieldRegrid = zeros(MatrixSize(1,1),MatrixSize(1,2),MatrixSize(1,3),size(kField,4),size(kField,5),size(kField,6),'single');
+end
+
+EpiTrajAdjkx = ReadPVParam(traj_dir, 'PVM_EpiTrajAdjkx') ;
+NSegments = ReadPVParam(fid_dir, 'NSegments') ;
+MatrixSize = ReadPVParam(fid_dir, 'PVM_Matrix') ;
+if sum(EpiTrajAdjkx>0)
+    for l = 1:size(kFieldRegrid,6)
+        for k = 1:size(kFieldRegrid,5)
+            for j = 1:size(kFieldRegrid,4)
+                for i = 1:size(kFieldRegrid,3)
+                    [kFieldRegrid(:,:,i,j,k,l)] = oneD_regriding_PV6(kField(:,:,i,j,k,l),EpiTrajAdjkx,NSegments,MatrixSize);
+                end
+            end
+        end
+    end
+end
+kField = kFieldRegrid;
+% kField =single(kField);
+clearvars kFieldRegrid;
+
+ZF = 0;%%ZF = 200 changed by Jay
+size_orig = size(kField,1);
+ZF = max([ZF size(kField,1)]);
+kFieldZF = zeros(ZF,size(kField,2),size(kField,3),size(kField,4),size(kField,5),size(kField,6),'single');
+for l = 1:size(kField,6)
+    for k = 1:size(kField,5)
+        for j = 1:size(kField,4)
+            for i = 1:size(kField,3)
+                [kFieldZF(:,:,i,j,k,l)] = Zero_filling_PV6(kField(:,:,i,j,k,l),ZF);
+            end
+        end
+    end
+end
+kField = kFieldZF;
+clearvars kFieldZF;
+kField = single(kField);
+
+% figure;imagesc(abs(FFTKSpace2XSpace(kField(:,:,1,1,1),1)))
+% figure;imagesc(abs(kField(:,:)))
+% figure;imagesc(abs(kField(:,2:2:end)))
+% figure;imagesc(abs(FFTKSpace2XSpace(kField(:,:,1,1,1),1)))
+
+% kField=kField(:,:,1);
+PVM_NEchoImages=ReadPVParam(fid_dir, 'PVM_NEchoImages');
+kFieldWhole=kField;
+NRepetitions=ReadPVParam(fid_dir, 'PVM_NRepetitions');
+
+if NRepetitions>1
+    IndRep = length(size(kFieldWhole));
+    if IndRep ==5
+        kFieldWhole = permute(kFieldWhole,[1,2,3,5,4]);
+    end
+    if IndRep ==6
+        kFieldWhole = permute(kFieldWhole,[1,2,3,6,4,5]);
+    end
+    kField=kFieldWhole;
+end
+
+DwNDiffExp=ReadPVParam(fid_dir, 'DwNDiffExp');
+if isempty(DwNDiffExp)==0
+    NRepetitions = NRepetitions*DwNDiffExp;
+end
+
+
+images=zeros([size(kFieldWhole,2),size(kFieldWhole,1),size(kFieldWhole,3), size(kFieldWhole,4)/EncNReceivers,PVM_NEchoImages],'single');
+for iNE=1:PVM_NEchoImages
+    
+    NumShots=ProcparStruct.nseg;
+    if ndims(kFieldWhole) == 6
+        kField=kFieldWhole(:,:,:,:,:,iNE);
+    end
+    if ndims(kFieldWhole) == 5
+        kField=kFieldWhole(:,:,:,:,iNE);
+    end
+    SliceNum=size(kField,3);
+    ArrayNum=size(kField,4);
+    SliceNum2=size(kField,3);
+    ArrayNum2=size(kField,4);
+    ChanelNum=1;
+    sliceNum=SliceNum;
+    
+    
+    matrix_size=[size(kField,1),size(kField,2),SliceNum];
+    
+    kField=reshape(kField,[matrix_size(1),matrix_size(2),SliceNum*ArrayNum]);
+    
+    if mod(iNE,2)==0
+        PhaseFactor = -1 ;
+    else
+        PhaseFactor = 1 ;
+    end
+    
+    
+    if mod(iNE,2)==0
+        kField=flip(kField,2);
+    end
+    
+    %% If the experiment is Diffusion weighted Imaging or CEST , it is better to Get Mask from the the first Imaging
+    if(bUseMask ~= 0)
+        if(PhaseArrayProc_mode==0)% to think how to do it
+            kFieldForMask=kField(:,:,:,1); % the first array is used to getmask
+        else
+            kFieldForMask=sum(kField(:,:,:,1:PhaseArrayTime),4); % the first array is used to getmask
+        end
+        
+        MaskForDiffSlice=CalMask4DiffImag(kFieldForMask,Para,AssumNoiseLength,Std2NoiseThreshFactor,DebugShow,ProcessWithPrePhaseCorr,SmoothMotionPhaseBetweenShots);
+    end
+    
+    %%
+    % kField=sum(kField(:,:,1,9:12),4);
+    
+    
+    SliceNum=size(kField,3);
+    ArrayNum=size(kField,4);
+    ChanelNum=1;
+    NumImages=SliceNum*ArrayNum;
+    if(bUseMask ~= 0)
+        TempMaskForDiff=zeros([size(MaskForDiffSlice,1),size(MaskForDiffSlice,2),SliceNum,ArrayNum],'single');
+        for iArrayIndex=1:ArrayNum
+            TempMaskForDiff(:,:,:,iArrayIndex) = reshape(MaskForDiffSlice,[size(MaskForDiffSlice,1),size(MaskForDiffSlice,2),SliceNum]);
+        end
+        MaskForDiff=reshape(TempMaskForDiff,[size(MaskForDiffSlice,1),size(MaskForDiffSlice,2),1,SliceNum*ArrayNum]);
+    end
+    
+    
+    kField=reshape(kField,[matrix_size(1),matrix_size(2),SliceNum*ArrayNum]);
+    
+    CmplxData = permute(kField, [2 1 3]) ;
+%     clear kField;
+    
+    
+    
+    SizeCmplxData = size(CmplxData) ;
+    SizeCmplxData = [SizeCmplxData(1:2), 1, SizeCmplxData(3:end)] ;
+    CmplxData = reshape(CmplxData, SizeCmplxData);
+    
+%     Imag=squeeze(FFTKSpace2XSpace(CmplxData,2));
+    Imag=FFTKSpace2XSpace(CmplxData,2);
+    Imag=reshape(Imag,[size(CmplxData,1),size(CmplxData,2),SliceNum2 ArrayNum2]);
+   Imag_origin=coilCombinebao( Imag );
+%    figure;imagesc(abs(Imag_origin));colormap gray;axis square;
+%     save('E:\work\SPEN\data\water\EvenOdd_kspace80.mat','CmplxData');
+
+    ImagShowNum=size(CmplxData,4);
+    if(size(CmplxData,4)>10)
+        ImagShowNum=10;
+    end
+    
+%     CmplxData=permute(CmplxData,[2 1 3 4 5]);
+%     CmplxData(:,:,:,1)=rot90(squeeze(CmplxData(:,:,:,1)),3);
+    
+    ROFFTedData=FFTKSpace2XSpace(CmplxData,2);
+    tmpROFFTedData=reshape(ROFFTedData,[matrix_size(2),matrix_size(1),SliceNum, ArrayNum]);
+    
+    
+    xShowRegion=linspace(-lpe/2,lpe/2,size(ROFFTedData,1));%[1:size(ROFFTedData,1)];%
+    yShowRegion=linspace(-lro/2,lro/2,size(ROFFTedData,2));%[1:size(ROFFTedData,2)];%
+    
+    %     figure('Name','FFTRead without SR and Fix');
+    %     ha = tight_subplot(3,ImagShowNum,0.001);
+    %     for iSilce=1:ImagShowNum
+    %         axes(ha(iSilce));
+    %         imagesc(abs(ROFFTedData(:,:,1,iSilce)));
+    %         axis square; colormap gray;axis tight;
+    %
+    %         axes(ha(iSilce+ImagShowNum));
+    %         imagesc(abs(ROFFTedData(1:2:end,:,1,iSilce)));
+    %         axis square; colormap gray;axis tight;
+    %
+    %         axes(ha(iSilce+2*ImagShowNum));
+    %         imagesc(abs(ROFFTedData(2:2:end,:,1,iSilce)));
+    %         axis square; colormap gray;axis tight;
+    %     end
+    
+    % figure('Name','FFTRead without every shot');
+    % ha = tight_subplot(1,NSegments,0.001);
+    % for ix=1:NSegments
+    %
+    %
+    %     axes(ha(ix));
+    %     imagesc(abs(ROFFTedData(ix:NSegments:end,:,1,1)));
+    %     axis square; colormap gray;axis tight;
+    %
+    % end
+    
+    aSign = -1 ;
+    
+    SE_flag = 1 ;
+    
+    PEIdxUse=1;
+    
+    
+    % a_rad2cmsqr is the 2nd order coefficient of the parabolic phase: [rad/cm^2]
+    
+    
+    switch SE_flag
+        case 2 % 90-chirp
+            rfwdth = ProcparStruct.Tp ; % [sec]
+            a_rad2cmsqr = +aSign * 2*pi * gammaHz * GPEe * rfwdth / (2*LPE) ;
+        case 1 % 180-chirp
+            rfwdth = ProcparStruct.Tp ; % [sec]
+            a_rad2cmsqr = +aSign * 2*pi * gammaHz * GPEe * rfwdth / (LPE) ;
+        otherwise
+            error(['Unsupported se_flag value: ' num2str(se_flag)]) ;
+    end
+    a_rad2cmsqr = PhaseFactor*a_rad2cmsqr(1) ;
+    
+    ProcparStruct.ppe=-ReadPVParam(fid_dir, 'PVM_SPackArrPhase1Offset') ;
+    ProcparStruct.ppe=ProcparStruct.ppe(1,1); %mod max
+    ProcparStruct.ppe=ProcparStruct.ppe/10;
+    WhichCoeffs=[1 1 1 1 1 1];
+    aSign = -1 ;                                                     % Option to fix sign of 2nd order coefficient of phase.                                                               % Option to take FOV shift along PE into account.
+    ParamsIn = [] ;
+    ShiftPE= -ProcparStruct.ppe*10;
+    ParamsIn.ShiftPE = -ProcparStruct.ppe*10;
+    ParamsIn.ShowResults=true;
+    ParamsIn.GaussRelativeWidth =0.5;
+    ParamsIn.ky1RelativePos = 0 ;
+    ParamsIn.RefflessParams.Polyfit2DOrder = 2 ;
+    ParamsIn.RefflessParams.Polyfit2DCoeffientsFit = WhichCoeffs;
+    ParamsIn.RefflessParams.FixSignalDirect1D = true ;
+    
+    ParamsIn.a_rad2cmsqr=a_rad2cmsqr;
+    ParamsIn.LPE=LPE;
+    ParamsIn.aSign=aSign;
+    ParamsIn.GaussRelativeWidth=GaussRelativeWidth;
+    
+    
+    
+    %% to show some phase detail
+    % [SPENNum,ReadNum,ChanleNum,NumImag]=size(tmpROFFTedData);
+    % ShowPEOddNumDataBeforePhaseCorr;
+    %
+    % if(bAMPCorrect ~= 0)
+    %     FixAmpBetweenShot;
+    % end
+    
+    
+    
+    %% Preprossecing to remove the phase caused by motion usually need this for invivo data
+    if(ProcessWithPrePhaseCorr ~= 0)
+        if(iNE==1)
+%             FixAndReconRefflessMultishotHybridSPEN_Robust_NewWhole;
+            FixAndReconRefflessMultishotHybridSPEN_Robust_NewWhole_back;
+        else
+            FixAndReconRefflessMultishotHybridSPEN_Robust_NewWholeWithMask;
+%             FixAndReconRefflessMultishotHybridSPEN_Robust_NewWholeWithMask
+        end
+        %
+        ReadFFTAfterShotBetweenCorr = FFTKSpace2XSpace(CmplxData(:,:,:,:), 2) ;
+        ky1RelativePos=0;
+        [tmpInvAZ,tmpAFinal]=calcInvA(a_rad2cmsqr,LPE,size(CmplxData,1),ShiftPE,-aSign,ky1RelativePos,GaussRelativeWidth);%ShiftPE is set to 0,as Amir has done it?
+        ImagAfterShotBetweenCorr=MultMatTensor(tmpInvAZ,ReadFFTAfterShotBetweenCorr);
+    else
+        ky1RelativePos=0;
+        [tmpInvAZ,tmpAFinal]=calcInvA(a_rad2cmsqr,LPE,size(CmplxData,1),ShiftPE,-aSign,ky1RelativePos,GaussRelativeWidth);%ShiftPE is set to 0,as Amir has done it?
+        ImagAfterShotBetweenCorr=MultMatTensor(tmpInvAZ,ROFFTedData);
+    end
+    
+    ImagAfterShotBetweenCorr=abs(reshape(ImagAfterShotBetweenCorr,[matrix_size(2),matrix_size(1),SliceNum, ArrayNum]));
+    % figure('Name','Whole Data SR with Phase corr Bwtween Shot');
+    % ha = tight_subplot(ArrayNum,SliceNum,0.00001);
+    % for iDiff=1:ArrayNum
+    %     for iSlice=1:SliceNum
+    %         axes(ha((iDiff-1)*SliceNum+iSlice));
+    %         imagesc(yShowRegion,xShowRegion,abs(ImagAfterShotBetweenCorr(:,:,iSlice,iDiff))); colormap gray;
+    %         axis equal;
+    %         axis tight;
+    %
+    %         if(iDiff==1 && iSlice==1)
+    %             c=caxis;
+    %         end
+    %         caxis(c);
+    %     end
+    % end
+    %% make sure the amplitude of different shot in some region
+    Para.nseg=NSegments;
+    ROFFTedData=FFTKSpace2XSpace(CmplxData,2);
+    %%%%%% new part
+    
+    for iImagIndex=1:size(CmplxData,4)
+        TempOneImag=ROFFTedData(:,:,1,iImagIndex);
+        oneShotAmp=zeros(1,Para.nseg,'single');
+        for iShotIndex=1:Para.nseg
+            oneShotAmp(iShotIndex)=sum(reshape(abs(TempOneImag(iShotIndex:Para.nseg:end,:)),[],1));
+        end
+        for iShotIndex=1:Para.nseg
+            Err(iShotIndex)=abs(oneShotAmp(iShotIndex)-median(oneShotAmp))/median(oneShotAmp);
+        end
+        ShotNeedAdjust=find(Err>0.1);
+        if(length(ShotNeedAdjust)>0)%% it better to do amplitude adjust of this data
+            
+            if(length(ShotNeedAdjust)>=2)
+                disp('warning this is not good data!!!!!!!!!')
+                disp('warning this is not good data!!!!!!!!!')
+            end
+            WholeMidNPEyy=floor(size(TempOneImag,1));
+            WholeCentralIdxsyy=round(WholeMidNPEyy/2)+(-10:10);
+            WholeCentralIdxsyy = WholeCentralIdxsyy(WholeCentralIdxsyy>0);
+            WholeCentralIdxsyy = WholeCentralIdxsyy(WholeCentralIdxsyy<=round(WholeMidNPEyy));
+            WholeOuterIdxyy=setdiff(1:WholeMidNPEyy,WholeCentralIdxsyy);
+            [tmpInvAZ,tmpAFinal]=calcInvA(a_rad2cmsqr,LPE,size(CmplxData,1)/2,ShiftPE,-aSign,ky1RelativePos,GaussRelativeWidth);%ShiftPE is set to 0,as Amir has done it?
+            InitAmp=  zeros(length(ShotNeedAdjust),6);
+            options=struct('MaxIter',2e3,'MaxFunEvals',2e3);
+            
+            NumShots=Para.nseg;
+            if(length(ShotNeedAdjust)>=2)
+                [BestAmp FinalBestCostA]=fminsearch(@(InitAmp)PenltiWholeSPEN_newAmp_corr(double(TempOneImag),WholeCentralIdxsyy,WholeOuterIdxyy,tmpInvAZ,NumShots,ShotNeedAdjust,InitAmp,median(oneShotAmp)),InitAmp,options);
+            else
+                [BestAmp FinalBestCostA]=fminsearch(@(InitAmp)PenltiWholeSPEN_newAmp_corr(double(TempOneImag),WholeCentralIdxsyy,WholeOuterIdxyy,tmpInvAZ,NumShots,ShotNeedAdjust,InitAmp),InitAmp,options);
+            end
+            [FinalCost  dddddd ] = PenltiWholeSPEN_newAmp_corr(double(TempOneImag),WholeCentralIdxsyy,WholeOuterIdxyy,tmpInvAZ,NumShots,ShotNeedAdjust,BestAmp);
+            
+            CmplxData(:,:,1,iImagIndex)= FFTXSpace2KSpace(    dddddd,2);
+        end
+        
+    end
+    %%%%% end of new part
+    
+    %     for iImagIndex=1:size(CmplxData,4)
+    %         TempOneImag=ROFFTedData(:,:,1,iImagIndex);
+    %         oneShotAmp=zeros(1,Para.nseg);
+    %         for iShotIndex=1:Para.nseg
+    %             oneShotAmp(iShotIndex)=sum(reshape(abs(TempOneImag(iShotIndex:Para.nseg:end,:)),[],1));
+    %         end
+    %         for iShotIndex=1:Para.nseg
+    %             Err(iShotIndex)=abs(oneShotAmp(iShotIndex)-median(oneShotAmp))/median(oneShotAmp);
+    %         end
+    %         ShotNeedAdjust=find(Err>0.1);
+    %         if(length(ShotNeedAdjust)>0)%% it better to do amplitude adjust of this data
+    %
+    %             if(length(ShotNeedAdjust)>=2)
+    %                 disp('warning this is not good data!!!!!!!!!')
+    %                 disp('warning this is not good data!!!!!!!!!')
+    %             end
+    %             WholeMidNPEyy=floor(size(TempOneImag,1)/2);
+    %             WholeCentralIdxsyy=round(WholeMidNPEyy/2)+(-10:10);
+    %             WholeOuterIdxyy=setdiff(1:WholeMidNPEyy,WholeCentralIdxsyy);
+    %             [tmpInvAZ,tmpAFinal]=calcInvA(a_rad2cmsqr,LPE,size(CmplxData,1)/2,ShiftPE,-aSign,ky1RelativePos,GaussRelativeWidth);%ShiftPE is set to 0,as Amir has done it?
+    %             InitAmp=  zeros(length(ShotNeedAdjust),6);
+    %             options=struct('MaxIter',2e3,'MaxFunEvals',2e3);
+    %
+    %             NumShots=Para.nseg;
+    %             if(length(ShotNeedAdjust)>=2)
+    %                 [BestAmp FinalBestCostA]=fminsearch(@(InitAmp)PenltiWholeSPEN_newAmp_corr(TempOneImag,WholeCentralIdxsyy,WholeOuterIdxyy,tmpInvAZ,NumShots,ShotNeedAdjust,InitAmp,median(oneShotAmp)),InitAmp,options);
+    %             else
+    %                 [BestAmp FinalBestCostA]=fminsearch(@(InitAmp)PenltiWholeSPEN_newAmp_corr(TempOneImag,WholeCentralIdxsyy,WholeOuterIdxyy,tmpInvAZ,NumShots,ShotNeedAdjust,InitAmp),InitAmp,options);
+    %             end
+    %             [FinalCost  dddddd ] = PenltiWholeSPEN_newAmp_corr(TempOneImag,WholeCentralIdxsyy,WholeOuterIdxyy,tmpInvAZ,NumShots,ShotNeedAdjust,BestAmp);
+    %
+    %             CmplxData(:,:,1,iImagIndex)= FFTXSpace2KSpace(    dddddd,2);
+    %         end
+    %
+    %     end
+    
+    %%
+    UseDefineMask=true([matrix_size(2),matrix_size(1),SliceNum, ArrayNum]);
+    if(bSelectedPhaseCorrRegion==true)
+        UseDefineMask=false([matrix_size(2),matrix_size(1),SliceNum, ArrayNum]);
+        figure('Name','Baseline to determine region')
+        ha = tight_subplot(1,SliceNum,0.01);
+        
+        for iSlice=1:SliceNum
+            for iRegionIndex=1:PhaseCorrRegionNum
+                axes(ha(iSlice));
+                imagesc(yShowRegion,xShowRegion,abs(ImagAfterShotBetweenCorr(:,:,iSlice,1))); colormap gray;axis equal;axis tight;
+                h = imfreehand;
+                %             h=imellipse;
+                for iArrayIndex=1:ArrayNum
+                    UseDefineMask(:,:,iSlice,iArrayIndex)=squeeze( squeeze( UseDefineMask(:,:,iSlice,iArrayIndex))|createMask(h));
+                end
+            end
+        end
+    end
+    
+    % figure('Name','The mask user define');
+    % for iSlice=1:SliceNum
+    %     imagesc(yShowRegion,xShowRegion,abs(UseDefineMask(:,:,iSlice,1))); colormap gray;axis equal;axis tight;
+    % end
+    % UseDefineMask = reshape(UseDefineMask, SizeCmplxData);
+    
+    if(iNE==1)
+        FixAndReconRefflessMultishotHybridSPEN_Robust_OddNum;
+%         FixAndReconRefflessMultishotHybridSPEN_Robust_NewWholeWithMask;%changed by JAY
+    else
+        FixAndReconRefflessMultishotHybridSPEN_Robust_OddNumWithMask;
+    end
+    
+    Imag_low_ori=reshape(WholeFixedSignalPostROFFT,[size(WholeFixedSignalPostROFFT,1),size(WholeFixedSignalPostROFFT,2),SliceNum2, ArrayNum2]);
+    Imag_low = squeeze(coilCombinebao( Imag_low_ori ));
+    % Export existing internal arrays; no reconstruction operation changed.
+    details.signal=Imag_low_ori;
+    details.anchor=reshape(FinalWholeDataAfterSRAfterPhaseAfterAmp,[matrix_size(2),matrix_size(1),SliceNum2,ArrayNum2]);
+    details.encoding=tmpAFinal; details.inverse=InvAWhole;
+    if ~isequal(size(details.encoding),size(InvAWhole))
+        [paired_inverse,details.encoding]=calcInvA(a_rad2cmsqr,LPE,size(CmplxDataFullIn,1),ParamsIn.ShiftPE,-aSign,0,GaussRelativeWidth);
+        assert(norm(paired_inverse(:)-InvAWhole(:))/norm(InvAWhole(:))<1e-8,'Full encoding not paired with original inverse');
+    end
+
+    
+    
+    TempSRdata0=FinalWholeDataAfterSRAfterPhaseAfterAmp;
+    
+    TempSRdata0=reshape(TempSRdata0,[matrix_size(2),matrix_size(1),SliceNum, ArrayNum]);
+    
+    
+    % figure;montage(reshape(abs(TempSRdata0),[matrix_size(2),matrix_size(1),1, SliceNum*ArrayNum]),[0, max(abs(TempSRdata0(:)))]);
+    
+    if(PhaseArrayProc_mode == 2)
+        
+        DiffArrayNum=round(ArrayNum/PhaseArrayTime);
+        if(DiffArrayNum < 1 )
+            PhaseArrayTime=1;
+            DiffArrayNum=1;
+        end
+        SRdata0=zeros([matrix_size(2),matrix_size(1),SliceNum, DiffArrayNum],'single');
+        for i=1:DiffArrayNum
+            SRdata0(:,:,:,i)=sum(abs(TempSRdata0(:,:,:,(i-1)*PhaseArrayTime+1:i*PhaseArrayTime)),4);
+        end
+        
+    end
+    if(PhaseArrayProc_mode==0)
+        
+        DiffArrayNum=round(ArrayNum);
+        SRdata0=TempSRdata0;
+        
+    end
+    
+    %     images = SRdata0;
+    SRdata0=reshape(SRdata0,[matrix_size(2),matrix_size(1),SliceNum2,ArrayNum2]);
+    %% sum of square of the channels
+    if EncNReceivers ~= 1
+        SRdata0 = reshape(SRdata0,[matrix_size(2),matrix_size(1),SliceNum2,ArrayNum2/EncNReceivers,EncNReceivers]);
+        SoSSRdata0 = sos(SRdata0 ,5);
+        SRdata0 = SoSSRdata0;
+    end
+    %% end of sum of square of the channels
+    
+    %% Reconstruction of array data of the channels
+    %     if EncNReceivers ~= 1
+    %         SRdata0 = reshape(SRdata0,[matrix_size(2),matrix_size(1),SliceNum2,ArrayNum2/EncNReceivers,EncNReceivers]);
+    %         SRdataReco = zeros(size(SRdata0,1),size(SRdata0,2),size(SRdata0,3),size(SRdata0,4),1);
+    % %        SoSSRdata0 = sos(SRdata0 ,5);
+    %         for i3 = 1:size(SRdata0,3)
+    %             for i4 = 1:size(SRdata0,4)
+    %                 C = cov(squeeze(SRdata0(:,:,i3,i4,1)),squeeze(SRdata0(:,:,i3,i4,2))); % Works only for two channel
+    %                 [recon,~]=adapt_array_2d(squeeze(SRdata0(:,:,i3,i4,:)),C,0);
+    %                 SRdataReco(:,:,i3,i4,1)= recon;
+    %             end
+    %         end
+    %         SRdata0 = SRdataReco;
+    %     end
+    %% end of Reconstruction of array data of the channels
+    
+    
+    images(:,:,:,:,iNE)=SRdata0;
+    
+    DataForMask=abs(SRdata0(:,:,:,1,1,1));
+    for iSlice=1:size(DataForMask,3)
+        DataForMask(:,:,iSlice)=smooth2a(DataForMask(:,:,iSlice),5,5);
+    end
+    MaskForSliceEcho1= DataForMask>0.15*max(DataForMask(:));
+  
+    
+%     for iSlice=1:size(DataForMask,3)
+%         se = strel('disk',3);
+%         MaskForSliceEcho1(:,:,iSlice) = imopen(MaskForSliceEcho1(:,:,iSlice),se);
+%         CC = bwconncomp(MaskForSliceEcho1(:,:,iSlice),4);
+%         L = labelmatrix(CC);
+%         numPixels = cellfun(@numel,CC.PixelIdxList);
+%         [biggest,idx] = max(numPixels);
+%         MaskForSliceEcho1(:,:,iSlice) = zeros(size(MaskForSliceEcho1(:,:,iSlice)));
+%         MaskForSliceEcho1(CC.PixelIdxList{idx}) = 1;
+%         se = strel('disk',5);
+%         MaskForSliceEcho1(:,:,iSlice) = imclose(MaskForSliceEcho1(:,:,iSlice),se);
+%         se = strel('disk',2);
+%         MaskForSliceEcho1(:,:,iSlice) = imdilate(MaskForSliceEcho1(:,:,iSlice),se);
+%     end
+   
+    
+    clearvars -except details images iNE PVM_NEchoImages lpe LPE lro kFieldWhole bUseMask PhaseArrayProc_mode PhaseArrayTime MaskForSliceEcho1...
+        Para AssumNoiseLengt Std2NoiseThreshFactor DebugShow ProcessWithPrePhaseCorr SmoothMotionPhaseBetweenShots size_orig...
+        bShowImaging bAMPCorrect bSelectedPhaseCorrRegion PhaseCorrRegionNum fid_dir SE_flag ProcparStruct gammaHz GaussRelativeWidth NSegments EncNReceivers...
+        GPEe Imag_origin Imag_low OneShotOddInvAZ OneShotEvenInvAZ WholeInvAZ tmpAFinal;
+end
+
+
+images = permute(images,[2 1 3 4 5 6]);
+kField = FFTXSpace2KSpace(images,1);
+kFieldRM_ZF = zeros(size_orig,size(kField,2),size(kField,3),size(kField,4),size(kField,5),size(kField,6),'single');
+for l = 1:size(kField,6)
+    for k = 1:size(kField,5)
+        for j = 1:size(kField,4)
+            for i = 1:size(kField,3)
+                [kFieldRM_ZF(:,:,i,j,k,l)] = RM_Zero_filling_PV6(kField(:,:,i,j,k,l),size_orig);
+            end
+        end
+    end
+end
+images = FFTKSpace2XSpace(kFieldRM_ZF,1);
+images = permute(images,[2 1 3 4 5 6]);
+% figure;imagesc(abs(images));colormap gray;axis square;
+SPEN_AZ.OneShotOddInvAZ=OneShotOddInvAZ;
+SPEN_AZ.OneShotEvenInvAZ=OneShotEvenInvAZ;
+SPEN_AZ.WholeInvAZ=WholeInvAZ;
+SPEN_AZ.tmpAFinal=tmpAFinal;
+end

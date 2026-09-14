@@ -1,0 +1,84 @@
+"""Exact existing operator class; encoding supplied by original MATLAB, no spenpy import."""
+import torch
+import sys
+sys.path.insert(0, '/home/data2/chk/workspace/2026/08/14/01_工作项目/spen_recons/diffusion_inverse_20260908/vendor/InverseBench')
+from inverse_problems.base import BaseOperator
+
+class SpenMagnitudeOperator(BaseOperator):
+    """InverseBench API plus a real adjoint and exact quadratic proximal solve.
+
+    Coils [C,H,W] or [B,C,H,W]; encoding [M,H]. Different RO columns are
+    independent. Cache an H x H real eigensystem per column instead of
+    constructing the enormous full image matrix. Input/output: [B,1,H,W]
+    normalized real images / [B,C,M,W] complex measurements.
+    """
+    def __init__(self, encoding, coils, pe_mask=None, sigma_noise=.01):
+        super().__init__(sigma_noise=sigma_noise, unnorm_shift=1., unnorm_scale=.5,
+                         device=encoding.device)
+        if encoding.ndim != 2 or not torch.is_complex(encoding):
+            raise ValueError('encoding must be a complex [M,H] tensor')
+        self.a_full = encoding
+        self.coils = coils.unsqueeze(0) if coils.ndim == 3 else coils
+        if self.coils.ndim != 4 or self.coils.shape[-2] != encoding.shape[1]:
+            raise ValueError('coils must be [C,H,W] or [B,C,H,W]')
+        self.mask = torch.ones(encoding.shape[0], dtype=torch.bool, device=self.device) if pe_mask is None else pe_mask.to(device=self.device, dtype=torch.bool)
+        if self.mask.shape != (encoding.shape[0],) or not self.mask.any():
+            raise ValueError('PE mask must select at least one encoding row')
+        if not torch.isfinite(encoding).all() or not torch.isfinite(self.coils).all():
+            raise ValueError('nonfinite encoding/coils')
+        self.a = encoding[self.mask]
+        self._eig = None
+
+    def linear(self, x):
+        z = self.coils * (x * .5)
+        return torch.einsum('mh,bchw->bcmw', self.a, z.to(self.a.dtype))
+
+    def forward(self, x, **kwargs):
+        if x.ndim != 4 or x.shape[1] != 1 or x.shape[-2:] != self.coils.shape[-2:]:
+            raise ValueError(f'Expected [B,1,{self.coils.shape[-2]},{self.coils.shape[-1]}]')
+        return self.linear(x + 1.)
+
+    def adjoint(self, y):
+        z = torch.einsum('mh,bcmw->bchw', self.a.conj(), y)
+        return .5 * (self.coils.conj()*z).sum(1, keepdim=True).real
+
+    def loss(self, pred, observation, **kwargs):
+        return (self.forward(pred)-observation).abs().square().flatten(1).sum(1)
+
+    def loss_m(self, measurements, observation):
+        return (measurements-observation).abs().square().flatten(1).sum(1)
+
+    def gradient(self, pred, observation, return_loss=False):
+        residual = self.forward(pred)-observation
+        grad = 2*self.adjoint(residual)
+        if return_loss:
+            return grad, residual.abs().square().flatten(1).sum(1)
+        return grad
+
+    def _eigensystem(self):
+        if self._eig is None:
+            # Form in double precision; return float32 for repeated GPU inference.
+            a = self.a.to(torch.complex128)
+            c = self.coils.to(torch.complex128)
+            ah_a = a.conj().T @ a
+            cc = torch.einsum('bciw,bcjw->bwij', c.conj(), c)
+            gram = (.25 * cc * ah_a[None, None]).real
+            vals, vecs = torch.linalg.eigh(gram)
+            self._eig = vals.clamp_min(0).float(), vecs.float()
+        return self._eig
+
+    def proximal(self, z, observation, rho):
+        """min_x ||forward(x)-y||^2 + rho ||x-z||^2, without clipping."""
+        rho = torch.as_tensor(rho, device=z.device, dtype=z.dtype)
+        if rho.numel() != 1 or float(rho) <= 0:
+            raise ValueError('rho must be a positive scalar')
+        vals, vecs = self._eigensystem()
+        offset = self.forward(torch.zeros_like(z))
+        rhs = self.adjoint(observation-offset) + rho*z
+        rhs = rhs[:, 0].transpose(-1, -2).unsqueeze(-1)  # [B,W,H,1]
+        coeff = vecs.transpose(-1,-2) @ rhs
+        out = vecs @ (coeff / (vals+rho).unsqueeze(-1))
+        return out.squeeze(-1).transpose(-1,-2).unsqueeze(1)
+
+    def relative_residual(self, x, observation):
+        return self.loss(x, observation).sqrt() / observation.abs().square().flatten(1).sum(1).sqrt().clamp_min(1e-12)

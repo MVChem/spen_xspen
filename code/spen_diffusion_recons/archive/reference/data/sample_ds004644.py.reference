@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Reproducible random FLASH preview export. Original NIfTI data are read only."""
+import argparse,json,hashlib
+from pathlib import Path
+import nibabel as nib
+import numpy as np
+from scipy import ndimage
+from PIL import Image
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+BASE=Path(__file__).resolve().parent
+OUT=BASE/'sample100_coronal_20260914/ds004644'
+SRC=BASE/'sources/ds004644'
+ANGLES=[-53,144,137,-144,-56,-131,54,-140,-50,131,-50,49,-44,39,-130,119,140,-42,-143,-120,98,44,-139,-38,-130,138,39,-46,-44,-130]
+# Visually selected in-plane specimen pose, degrees counterclockwise relative to
+# array[:,:,k].T shown with origin='upper'. No anatomical L/R labels are inferred.
+# Crop coordinates on the once-rotated native 40um grid: x0,y0,x1,y1.
+CROPS={1: [102, 100, 363, 283], 2: [64, 90, 346, 281], 3: [67, 92, 328, 269], 4: [64, 112, 350, 284], 5: [80, 96, 356, 278], 6: [77, 93, 332, 272], 7: [88, 92, 330, 287], 8: [94, 110, 320, 292], 9: [70, 90, 340, 308], 10: [68, 94, 344, 283], 11: [78, 98, 326, 277], 12: [72, 113, 351, 299], 13: [72, 92, 312, 267], 14: [79, 109, 326, 286], 15: [80, 103, 358, 290], 16: [44, 84, 340, 258], 17: [62, 82, 323, 273], 18: [77, 120, 365, 311], 19: [62, 100, 343, 283], 20: [77, 111, 349, 327], 21: [42, 54, 289, 239], 22: [62, 94, 341, 285], 23: [74, 112, 337, 298], 24: [81, 96, 335, 306], 25: [70, 106, 369, 315], 26: [58, 83, 343, 273], 27: [77, 109, 327, 285], 28: [83, 121, 372, 307], 29: [67, 100, 329, 282], 30: [75, 104, 359, 273]}
+
+def sheets(records, folder, key, prefix, step=12, grids=True):
+    for start in range(0,len(records),step):
+        subset=records[start:start+step]
+        fig,axes=plt.subplots(4,3,figsize=(15,19),squeeze=False)
+        for ax,r in zip(axes.flat,subset):
+            a=np.load(folder/r[key]) if str(r[key]).endswith('.npy') else np.asarray(Image.open(folder/r[key]))
+            v=np.percentile(a[a>0],99.5) if np.any(a>0) else 1
+            ax.imshow(a,cmap='gray',vmin=0,vmax=v,origin='upper')
+            ax.set_title(f"{r['sample_id']} {r['subject']} k={r['source_index']}\nangle={r['rotation_degrees_ccw']} shape={a.shape}",fontsize=11)
+            if grids: ax.grid(alpha=.25)
+            else: ax.axis('off')
+        for ax in list(axes.flat)[len(subset):]: ax.axis('off')
+        fig.tight_layout()
+        fig.savefig(folder/f'{prefix}_{start+1:02d}.png',dpi=110)
+        plt.close(fig)
+
+def main():
+    ap=argparse.ArgumentParser();ap.add_argument('--stage',choices=['rotate','export'],default='rotate');a=ap.parse_args()
+    selection=json.loads((OUT/'selection.json').read_text())
+    (OUT/'working_rotated').mkdir(exist_ok=True)
+    (OUT/'raw_planes').mkdir(exist_ok=True)
+    (OUT/'native_roi').mkdir(exist_ok=True)
+    (OUT/'images_192').mkdir(exist_ok=True)
+    records=[]
+    for n,s in enumerate(selection['samples']):
+        sid=s['sample_id'];p=SRC/s['source_relative'];k=s['axis2_index']
+        header=nib.load(p)
+        spacing=[float(v) for v in header.header.get_zooms()[:3]]
+        assert np.allclose(spacing, [.04,.04,.04], rtol=.003)
+        assert abs(spacing[0]-spacing[1]) < 1e-7
+        assert nib.aff2axcodes(header.affine)[2] in ('A','P')
+        assert np.ceil(.30*header.shape[2]) <= k < np.floor(.60*header.shape[2])
+        orig=OUT/'raw_planes'/f'{sid}.npy'
+        if not orig.exists():
+            img=nib.load(p); plane=np.asarray(img.dataobj[:,:,k],dtype=np.float32).T
+            np.save(orig,plane)
+        else: plane=np.load(orig)
+        rotated=ndimage.rotate(plane,ANGLES[n],reshape=True,order=1,mode='constant',cval=0,prefilter=False)
+        rotate_path=Path('working_rotated')/f'{sid}.npy';np.save(OUT/rotate_path,rotated)
+        r=dict(sample_id=sid,subject=s['animal_id'],source='ds004644',sequence='FLASH T2starw',source_file=str(p),source_relative=s['source_relative'],source_axis=2,source_index=k,original_random_selection=s,rotation_degrees_ccw=ANGLES[n],source_plane_operation='array[:,:,index].T; displayed origin upper',native_pixel_spacing_mm=spacing[:2],rotated_plane=str(rotate_path),raw_plane=str(orig.relative_to(OUT)),pose_note='Manual visual in-plane pose correction to place dorsal brain superior; display pose only, no anatomical left/right labels inferred',replacement=False, source_shape=list(header.shape), source_axcodes=list(nib.aff2axcodes(header.affine)), crop_is_brain_mask=False)
+        r['visual_qc_note']={9:'Visible left-right anatomical asymmetry and heterogeneous texture already present in native selected slice; retained for honest random review',20:'Visible anatomical asymmetry and low local contrast in native selected slice; retained for honest random review',24:'Visible left-right anatomical asymmetry remains after in-plane correction; retained for honest random review'}.get(n+1,'Complete visible brain boundary retained with surrounding margin; dorsal side superior; manual visual review')
+        if a.stage=='export':
+            x0,y0,x1,y1=CROPS[n+1]; roi=rotated[y0:y1,x0:x1].copy(); h,w=roi.shape
+            assert 0 <= x0 < x1 <= rotated.shape[1] and 0 <= y0 < y1 <= rotated.shape[0]
+            assert np.all(np.isfinite(roi)) and float(roi.std())>0
+            assert max(h,w)>=192,(sid,h,w)
+            side=max(h,w);top=(side-h)//2;left=(side-w)//2
+            pad=((top,side-h-top),(left,side-w-left))
+            sq=np.pad(roi,pad,mode='constant')
+            lo=0.;hi=float(np.percentile(roi[roi>0],99.5))
+            im8=np.uint8(np.rint(np.clip((sq-lo)/(hi-lo),0,1)*255))
+            img=Image.fromarray(im8).resize((192,192),resample=Image.Resampling.BOX)
+            dest=Path('images_192')/f'{sid}.png';img.save(OUT/dest)
+            native=Path('native_roi')/f'{sid}.npy';np.save(OUT/native,roi)
+            r.update(image_192=str(dest),native_roi=str(native),rect_crop_xyxy=[x0,y0,x1,y1],native_roi_shape_yx=[h,w],padding_yx=[list(p) for p in pad],square_side_native_pixels=side,resize_scale=192/side,no_upscale=True,effective_output_spacing_mm=side*spacing[0]/192,display_window=[lo,hi],display_window_rule='0 to 99.5th percentile of positive cropped native signal',resize_method='Pillow BOX (area average)',rotation_interpolation='bilinear',denoising=False,sharpening=False,png_sha256=hashlib.sha256((OUT/dest).read_bytes()).hexdigest())
+        records.append(r)
+    if a.stage=='rotate':
+        (OUT/'rotation_manifest.json').write_text(json.dumps(dict(records=records),indent=2))
+        sheets(records,OUT,'rotated_plane','rotated_candidates')
+    else:
+        assert len(records)==30 and len({(r['subject'],r['source_index']) for r in records})==30
+        report=dict(seed=selection['seed'],selection_rule=selection['selection_rule'],count=30,animals=22,source='ds004644',status='preview_for_visual_review_not_training_release',processing='Original selected native coronal planes; manual in-plane rotation and rectangular brain-dominant crop; aspect-preserving black square padding; downsample only to 192x192; no denoising/sharpening',visual_qc='All 30 selected images inspected after rotation and crop; no selection replacement',records=records)
+        (OUT/'manifest.json').write_text(json.dumps(report,indent=2))
+        sheets(records,OUT,'image_192','final_qc',grids=False)
+        print(json.dumps(dict(count=len(records),subjects=len({r['subject'] for r in records}),manifest=str(OUT/'manifest.json'))))
+if __name__=='__main__':main()

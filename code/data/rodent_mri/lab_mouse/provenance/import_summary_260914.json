@@ -1,0 +1,24 @@
+{
+  "import_date": "2026-09-14",
+  "source_session_id": "01a09f0a-f236-7ca3-96f1-84bf06cc493e",
+  "remote_host": "192.168.1.230",
+  "source_inventory_original_path": "/home/data2/chk/workspace/2026/09/14/nxz_rat_provenance/server_inventory/native_rodent_inventory.json",
+  "source_inventory_sha256": "5aa3e532c34301f1fca94e20dd5536badee52bcc7d24c1985354bdda819dc4cc",
+  "physical_scan_directories": 721,
+  "scan_directories_with_direct_fid_or_ser_or_rawdata": 702,
+  "scan_directories_without_direct_fid_or_ser_or_rawdata": 19,
+  "study_subject_file_count": 480,
+  "scan_directories_without_parent_subject": [
+    "/home/user/data2/RAT/20180521_Chengdu UTCM_LiMan/20180521_fd_con_5_2.Nu1/9"
+  ],
+  "previously_incomplete_scan_directories": 13,
+  "excluded_phantom_groups": 19,
+  "existing_primary_2dseq_hash_comparisons": 708,
+  "existing_primary_2dseq_hash_mismatches": 0,
+  "remote_copied_regular_files": 14587,
+  "remote_copied_bytes": 19764668842,
+  "existing_local_linked_archives": 1,
+  "existing_local_linked_archive_bytes": 17374752,
+  "sha256_report": "verification_260914.json",
+  "preprocessing_performed": false
+}

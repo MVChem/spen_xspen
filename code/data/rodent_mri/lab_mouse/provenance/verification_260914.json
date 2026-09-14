@@ -1,0 +1,9 @@
+{
+  "verified_utc": "2026-09-14T11:36:06.123819+00:00",
+  "manifest": "/home/data2/chk/workspace/2026/09/14/spen_xspen/code/data/rodent_mri/lab_mouse/provenance/remote_manifest_260914.json",
+  "destination": "/home/data2/chk/workspace/2026/09/14/spen_xspen/code/data/rodent_mri/lab_mouse/old_server",
+  "file_count": 14588,
+  "logical_bytes": 19782043594,
+  "sha256_verified_files": 14588,
+  "errors": []
+}
