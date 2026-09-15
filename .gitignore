@@ -25,7 +25,10 @@ htmlcov/
 
 # Runtime directories. Do not ignore source folders such as scripts/data.
 /data/
-/code/data/rodent_mri/lab_mouse/old_server/
+# Shared datasets, provenance files and machine-local data links.
+/code/data/
+# Reconstruction figures and experiment outputs.
+/experiments/
 /results/
 /runs/
 /code/*/data/
@@ -96,6 +99,8 @@ htmlcov/
 /paper/build/
 
 # Temporary files
+/tmp/
+/notes/
 *.tmp
 *.swp
 *~
