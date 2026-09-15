@@ -1,0 +1,5 @@
+# Install after the project's existing requirements. Tested versions are saved in each run.
+diffusers>=0.35
+transformers>=4.45
+huggingface_hub>=0.34
+safetensors>=0.4
