@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SPEN 重建浏览器</title>
+  <style>
+    :root { color-scheme: light; --ink: #16252d; --muted: #64717a; --border: #dce3e7; --accent: #087e8b; --soft: #eaf5f5; --bg: #f3f5f6; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: var(--bg); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", sans-serif; }
+    button, select, input { font: inherit; }
+    button, select, input[type="number"], input[type="search"] { min-height: 40px; border: 1px solid #cbd6dc; border-radius: 7px; background: white; color: var(--ink); }
+    button { padding: 7px 12px; cursor: pointer; }
+    button:hover:not(:disabled) { border-color: var(--accent); background: var(--soft); }
+    button:disabled { cursor: default; opacity: .4; }
+    select, input[type="search"] { padding: 8px 10px; width: 100%; min-width: 0; }
+    input[type="number"] { padding: 7px; width: 72px; }
+    input[type="range"] { width: 100%; min-width: 50px; accent-color: var(--accent); cursor: pointer; }
+    :focus-visible { outline: 3px solid #61bec7; outline-offset: 3px; }
+    a { color: #076e7b; text-underline-offset: 3px; }
+    main { max-width: 1600px; margin: auto; padding: 23px 28px 42px; }
+    .masthead { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
+    .eyebrow { font-size: 11px; letter-spacing: .12em; font-weight: 700; color: var(--accent); }
+    h1 { font-size: 27px; letter-spacing: -.035em; line-height: 1.3; margin: 3px 0 3px; }
+    .subtitle, .muted { color: var(--muted); }
+    .subtitle { margin: 0; font-size: 13px; }
+    .overall-stats { display: flex; gap: 26px; flex-shrink: 0; }
+    .stat { display: grid; gap: 0; }
+    .stat b { font-size: 24px; font-variant-numeric: tabular-nums; font-weight: 650; line-height: 1.3; }
+    .stat span { font-size: 12px; color: var(--muted); }
+    .selection { background: #fff; padding: 17px 19px 15px; border: 1px solid var(--border); border-radius: 11px; }
+    .selectors { display: grid; grid-template-columns: minmax(200px, 1.1fr) minmax(180px, .8fr) minmax(280px, 1.7fr); gap: 15px; }
+    .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .field label, .field-label { color: #3e505a; font-size: 12px; font-weight: 650; }
+    .search-box { position: relative; }
+    .search-box input { padding-right: 35px; }
+    .search-clear { min-height: 26px; width: 26px; padding: 0; position: absolute; right: 7px; top: 7px; border: 0; color: var(--muted); }
+    .scan-picker { display: flex; gap: 6px; }
+    .scan-picker select { flex: 1; }
+    .arrow { padding: 6px 10px; min-width: 36px; font-size: 18px; line-height: 1; }
+    .selection-caption { display: flex; gap: 14px; align-items: flex-start; justify-content: space-between; margin-top: 11px; font-size: 12px; }
+    #case-path { overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--muted); }
+    #scan-position { color: var(--muted); flex-shrink: 0; }
+    .workspace { margin-top: 19px; }
+    .case-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 11px; }
+    h2 { font-size: 20px; line-height: 1.3; margin: 0 0 4px; font-weight: 650; }
+    #case-meta { font-size: 12px; color: var(--muted); }
+    .badge { display: inline-block; flex-shrink: 0; padding: 4px 9px; border-radius: 5px; font-size: 12px; font-weight: 600; background: #e3f2eb; color: #24674d; }
+    .badge.partial { background: #fff0d3; color: #845815; }
+    .badge.preview { background: #e9edf1; color: #4e626e; }
+    .badge.unavailable { background: #fbe8e5; color: #a0443c; }
+    .controls { display: grid; grid-template-columns: minmax(270px, 1.7fr) minmax(110px, .55fr) minmax(95px, .45fr) minmax(190px, 1fr); gap: 20px; align-items: end; padding: 13px 17px; background: white; border: 1px solid var(--border); border-radius: 9px; }
+    .slice-nav { display: flex; align-items: center; gap: 8px; min-height: 40px; }
+    .slice-nav .arrow { min-height: 35px; min-width: 30px; padding: 4px 6px; }
+    .slice-range-wrap { flex: 1; min-width: 60px; display: flex; align-items: center; }
+    #slice-count { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .viewer-status { min-height: 34px; display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 8px 1px 7px; font-size: 12px; color: var(--muted); }
+    #frame-position { color: #39505d; font-weight: 550; font-variant-numeric: tabular-nums; }
+    .panel-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .panel-grid[data-panels="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 1100px; margin-inline: auto; }
+    .panel-grid[data-panels="1"] { grid-template-columns: minmax(0, 1fr); max-width: 680px; margin-inline: auto; }
+    .image-card { background: #10161a; border: 1px solid #26343e; border-radius: 9px; overflow: hidden; min-width: 0; }
+    .panel-heading { padding: 11px 12px 9px; min-height: 64px; }
+    .panel-heading h3, .panel-heading h5 { color: #f5f7f8; font-size: 14px; margin: 0 0 2px; font-weight: 600; }
+    .panel-heading p { color: #95a9b5; font-size: 11px; margin: 0; }
+    .image-hit { width: 100%; padding: 0; min-height: 0; display: grid; place-items: center; border: 0; border-radius: 0; background: #000; aspect-ratio: 1; }
+    .image-hit:hover:not(:disabled) { background: #000; }
+    .image-hit img { display: block; width: 100%; height: 100%; max-height: 640px; object-fit: contain; image-rendering: pixelated; image-rendering: crisp-edges; }
+    .image-hit:hover img { opacity: .92; }
+    .panel-caption { color: #90a4af; font-size: 11px; padding: 7px 12px; display: flex; justify-content: space-between; gap: 10px; }
+    .missing-panel { min-height: 120px; aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 23px; background: #080d10; color: #a7b7bf; }
+    .missing-panel strong { font-size: 14px; color: #d9e1e6; margin-bottom: 8px; font-weight: 550; }
+    .missing-panel p { font-size: 12px; margin: 0; overflow-wrap: anywhere; max-height: 150px; overflow: auto; }
+    .notice { margin: 11px 0 0; padding: 10px 13px; border: 1px solid #ebd3a7; border-left: 3px solid #bf8b31; border-radius: 6px; background: #fff8eb; font-size: 12px; color: #74551b; overflow-wrap: anywhere; }
+    .notice ul { margin: 5px 0 0; padding-left: 18px; }
+    .notice li + li { margin-top: 4px; }
+    .notice button { color: #74551b; font-size: 12px; min-height: 28px; padding: 3px 8px; background: #fffdfa; border-color: #ddc598; margin-left: 8px; }
+    .slice-section { background: #fff; border: 1px solid var(--border); border-radius: 9px; padding: 13px 16px; margin-top: 15px; }
+    .slice-section-header { display: flex; gap: 15px; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+    .slice-section h3 { margin: 0; font-size: 13px; font-weight: 650; }
+    #thumbnail-caption { margin: 0; font-size: 11px; color: var(--muted); }
+    .slice-strip { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 7px; scrollbar-color: #adbec6 transparent; }
+    .slice-thumb { min-width: 81px; width: 81px; flex: 0 0 81px; padding: 3px; border: 2px solid transparent; border-radius: 6px; background: #f1f4f5; }
+    .slice-thumb[aria-pressed="true"] { border-color: var(--accent); background: var(--soft); }
+    .slice-thumb img { display: block; width: 71px; height: 71px; object-fit: contain; image-rendering: pixelated; image-rendering: crisp-edges; background: #000; border-radius: 2px; }
+    .slice-thumb span { display: block; font-size: 11px; margin-top: 3px; color: #4f626d; }
+    .slice-thumb[aria-pressed="true"] span { color: var(--accent); font-weight: 700; }
+    .thumb-empty { width: 71px; height: 71px; display: grid; place-items: center; color: #9aadb9; background: #0e171c; font-size: 11px; }
+    .empty-state { padding: 65px 24px; text-align: center; background: #fff; border: 1px dashed #c8d4db; border-radius: 9px; }
+    .empty-state strong { font-size: 20px; font-weight: 600; }
+    .empty-state p { color: var(--muted); max-width: 720px; margin: 12px auto 0; overflow-wrap: anywhere; }
+    .supplementary { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 30px; margin-top: 17px; }
+    details { font-size: 12px; color: var(--muted); min-width: 240px; flex: 1; }
+    summary { cursor: pointer; color: #4a6472; padding: 5px 0; }
+    details p { line-height: 1.7; margin: 7px 0; }
+    .metadata { margin-top: 8px; display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 5px 8px; }
+    .metadata dt { color: #74848e; }
+    .metadata dd { margin: 0; overflow-wrap: anywhere; }
+    .download-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+    footer { font-size: 11px; color: #85929a; display: flex; justify-content: space-between; gap: 16px; margin-top: 23px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    [hidden] { display: none !important; }
+    dialog { border: 1px solid #40515d; border-radius: 12px; background: #111a21; color: #eef4f7; padding: 0; width: min(900px, 94vw); max-height: 94vh; box-shadow: 0 25px 90px #0006; }
+    dialog::backdrop { background: #0a131bdd; }
+    .dialog-header { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; padding: 14px 17px; }
+    .dialog-header h2 { font-size: 17px; }
+    #zoom-context { font-size: 12px; color: #96aab6; }
+    #zoom-close { color: white; background: #25333d; border: 1px solid #40515d; min-width: 35px; }
+    .zoom-stage { background: #000; min-height: 200px; display: flex; justify-content: center; align-items: center; padding: 0; overflow: auto; }
+    #zoom-image { display: block; width: 100%; max-height: 72vh; object-fit: contain; image-rendering: pixelated; image-rendering: crisp-edges; }
+    .dialog-footer { display: flex; justify-content: space-between; gap: 20px; padding: 10px 17px; font-size: 12px; color: #a3b4be; }
+    .dialog-footer a { color: #77d3de; }
+    @media (min-width: 1800px) { main { max-width: 1800px; } }
+    @media (max-width: 1000px) {
+      main { padding: 18px 18px 32px; }
+      .selectors { grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr); gap: 12px; }
+      .selectors .scan-field { grid-column: 1 / -1; }
+      .controls { grid-template-columns: minmax(220px, 1.5fr) minmax(90px, .5fr) minmax(90px, .5fr); gap: 13px; }
+      .view-field { grid-column: 1 / -1; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; }
+      .panel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .overall-stats { gap: 19px; }
+    }
+    @media (max-width: 600px) {
+      main { padding: 16px 10px 26px; }
+      .masthead { align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+      h1 { font-size: 23px; }
+      .subtitle { font-size: 11px; }
+      .overall-stats { gap: 10px; text-align: right; }
+      .stat b { font-size: 18px; }
+      .stat span { font-size: 10px; }
+      .stat:first-child { display: none; }
+      .selection { padding: 12px; }
+      .selectors { grid-template-columns: minmax(0, 1fr); }
+      .selectors .scan-field { grid-column: auto; }
+      .selection-caption { display: block; }
+      #scan-position { display: block; margin-top: 4px; }
+      .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; padding: 12px; }
+      .slice-field { grid-column: 1 / -1; }
+      .view-field { grid-column: 1 / -1; }
+      .viewer-status { font-size: 11px; gap: 6px; align-items: flex-start; }
+      .panel-grid { gap: 7px; }
+      .panel-heading { padding: 8px 8px 6px; min-height: 58px; }
+      .panel-heading h3, .panel-heading h5 { font-size: 12px; }
+      .panel-heading p, .panel-caption { font-size: 10px; }
+      .panel-caption { padding: 6px 8px; }
+      .panel-caption span:last-child { display: none; }
+      .missing-panel { padding: 10px; }
+      .missing-panel strong { font-size: 12px; }
+      .missing-panel p { font-size: 10px; max-height: 100px; }
+      .slice-section { padding: 12px 10px; }
+      .slice-section-header { display: block; }
+      #thumbnail-caption { margin-top: 3px; }
+      h2 { font-size: 18px; }
+      .badge { font-size: 11px; }
+      footer { display: block; }
+      footer span { display: block; margin-top: 4px; }
+    }
+
+    .selection { position: sticky; top: 0; z-index: 20; box-shadow: 0 4px 16px #2236400a; }
+    .selectors.exp-selectors { grid-template-columns: minmax(280px, 1.5fr) minmax(190px, .8fr) minmax(250px, 1fr); }
+    .selectors.exp-selectors .scan-field { grid-column: auto; }
+    .experiment-caption { margin: 11px 0 0; font-size: 12px; color: var(--muted); }
+    .experiment-name { overflow-wrap: anywhere; margin: 20px 0 4px; font-size: 17px; }
+    #experiment-meta { font-size: 12px; color: var(--muted); }
+    .display-note { margin: 11px 0 20px; }
+    .scan-section { margin: 27px 0 36px; scroll-margin-top: calc(var(--controls-height, 130px) + 14px); }
+    .scan-header { padding: 15px 17px; background: #fff; border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; }
+    .scan-header .case-heading { margin: 0; }
+    .scan-meta { color: var(--muted); font-size: 12px; }
+    .scan-id { margin: 6px 0 0; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+    .volume-group { margin-top: 21px; }
+    .volume-heading { font-size: 13px; color: #496471; font-weight: 650; padding-bottom: 7px; border-bottom: 1px solid var(--border); margin: 0 0 10px; }
+    .frame-row { margin: 0 0 21px; padding: 9px 0 18px; border-bottom: 1px solid #dee5e9; scroll-margin-top: calc(var(--controls-height, 130px) + 14px); }
+    .frame-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 9px; }
+    .frame-coordinates { margin: 0; font-size: 13px; font-weight: 600; color: #304c5b; font-variant-numeric: tabular-nums; }
+    .frame-actions { display: flex; gap: 12px; align-items: center; font-size: 11px; flex-shrink: 0; }
+    .frame-actions .badge { padding: 3px 7px; font-size: 11px; }
+    .frame-reason { margin-top: 9px; }
+    .scan-section .empty-state { margin-top: 14px; padding: 33px 20px; }
+    .scan-section .empty-state strong { font-size: 17px; }
+    .scan-section .empty-state p { font-size: 13px; }
+    .panel-grid[data-panels="2"] { max-width: 1060px; }
+    .panel-grid[data-panels="1"] { max-width: 620px; }
+    .panel-heading { min-height: 59px; }
+    .supplementary { margin: 0; }
+    @media (max-width: 1000px) {
+      .selectors.exp-selectors { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .selectors.exp-selectors .dataset-field { grid-column: 1 / -1; }
+      .selectors.exp-selectors .view-field { grid-column: auto; display: flex; align-items: stretch; gap: 6px; }
+      .experiment-caption { font-size: 11px; }
+    }
+    @media (max-width: 600px) {
+      .selection { padding: 9px 10px; }
+      .selectors.exp-selectors { gap: 8px 10px; }
+      .selectors.exp-selectors .field { gap: 3px; }
+      .selectors.exp-selectors label { font-size: 11px; }
+      .selectors.exp-selectors select { min-height: 36px; padding: 6px 7px; font-size: 12px; }
+      .experiment-caption { margin-top: 7px; }
+      .experiment-name { font-size: 14px; }
+      .scan-header { padding: 12px; }
+      .scan-section { margin-top: 20px; }
+      .frame-heading { align-items: flex-start; gap: 8px; }
+      .frame-coordinates { font-size: 11px; }
+      .frame-actions { gap: 7px; font-size: 10px; }
+      .frame-actions .badge { font-size: 10px; }
+      .frame-actions .detail-link { display: none; }
+      .volume-heading { font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header class="masthead">
+    <div>
+      <div class="eyebrow">SCANNER DATA / RECONSTRUCTION</div>
+      <h1>SPEN 重建浏览器</h1>
+      <p class="subtitle">选择一个实验，向下滚动查看它的全部扫描和切片。</p>
+    </div>
+    <div class="overall-stats" aria-label="数据总览">
+      <div class="stat"><b id="stat-experiments">—</b><span>组采集</span></div>
+      <div class="stat"><b id="stat-cases">—</b><span>扫描记录</span></div>
+      <div class="stat"><b id="stat-frames">—</b><span>全部帧</span></div>
+    </div>
+  </header>
+  <section class="selection" id="selection-controls" aria-label="选择实验和查看内容">
+    <div class="selectors exp-selectors">
+      <div class="field dataset-field"><label for="dataset-select">实验 / Exp</label><select id="dataset-select"></select></div>
+      <div class="field scan-field"><label for="scan-select">跳至扫描 <span class="muted">（本页全部展示）</span></label><select id="scan-select"></select></div>
+      <div class="field view-field"><label for="view-select">查看内容</label><select id="view-select"></select></div>
+    </div>
+    <p id="experiment-caption" class="experiment-caption"></p>
+  </section>
+  <h2 id="experiment-name" class="experiment-name"></h2>
+  <div id="experiment-meta"></div>
+  <details id="display-details" class="display-note">
+    <summary>图像显示说明</summary>
+    <p>每个扫描的全部 slice、volume 和 echo 均直接列在下方，索引从 0 开始。向下滚动即可查看，点击任何图像可放大。</p>
+    <p>原始 ADC 采用 log(1 + RSS)、p1–p99.5 窗口；RO FFT 和重建图采用 RSS、0–p99.5 窗口。各图独立设窗，亮度不能直接用于定量比较。预览按原像素缩放，不作平滑。</p>
+    <p>RO FFT 与重建预览沿用旧图集的翻转方向；ADC 与扫描仪图保留原方向，不定义解剖方向。未做相位校正的结果单独标注；未提供的方法显示原因。NPZ 数值和坐标保持原样。</p>
+  </details>
+  <section id="experiment-gallery" aria-label="当前实验的全部扫描和全部帧"></section>
+  <footer><span id="coverage-note"></span><a id="archive-link" href="archive.html">原分页图集 ↗</a></footer>
+  <div class="sr-only" id="live-status" role="status" aria-live="polite" aria-atomic="true"></div>
+</main>
+<dialog id="zoom-dialog" aria-labelledby="zoom-title">
+  <div class="dialog-header"><div><h2 id="zoom-title"></h2><div id="zoom-context"></div></div><button id="zoom-close" type="button" aria-label="关闭放大图">×</button></div>
+  <div class="zoom-stage"><img id="zoom-image" alt=""></div>
+  <div class="dialog-footer"><span id="zoom-dimensions"></span><a id="zoom-download" href="#" download>保存 PNG</a></div>
+</dialog>
+<script id="viewer-data" type="application/json">__VIEWER_DATA__</script>
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const data = JSON.parse($('viewer-data').textContent);
+  const cases = data.cases || [];
+  const caseMap = new Map(cases.map(c => [String(c.id), c]));
+  const collator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
+  const integer = value => Number.isFinite(Number(value)) ? Number(value) : 0;
+  const indices = (frames, axis) => [...new Set(frames.map(f => integer(f[axis])))].sort((a, b) => a - b);
+  const count = value => Number(value || 0).toLocaleString('zh-CN');
+  const setText = (id, value) => { $(id).textContent = value == null ? '' : String(value); };
+  const framesOf = c => c && Array.isArray(c.frames) ? c.frames : [];
+  const experiments = [...new Set(cases.map(c => c.experiment || '').filter(Boolean))].sort(collator.compare);
+  const defaultCase = caseMap.get(String(data.default_case_id)) || cases[0];
+  const defaultExperiment = defaultCase ? defaultCase.experiment : experiments[0];
+  const state = { exp: defaultExperiment, view: 'compare4', anchor: null };
+  let lastRenderedHash = null;
+  let scrollRequest = null;
+  const panelSpecs = {
+    sorted_samples: { title: '原始 ADC', subtitle: '排序后的采样信号 · log RSS' },
+    rofft_original: { title: 'RO FFT', subtitle: '读出方向傅里叶变换 · RSS' },
+    inva_corrected: { title: 'Phase Map + InvA', subtitle: '相位校正后 · RSS' },
+    tikhonov_coils: { title: 'Tikhonov', subtitle: '相位校正后 · RSS' },
+    scanner_preview: { title: '扫描仪原图', subtitle: '扫描仪 2dseq 预览 · 原方向' },
+    inva_uncorrected: { title: 'InvA · 未做相位校正', subtitle: '未校正结果 · RSS' },
+    tikhonov_uncorrected: { title: 'Tikhonov · 未做相位校正', subtitle: '未校正结果 · RSS' }
+  };
+  const views = {
+    compare4: { title: '四图对比 · ADC / FFT / 两种重建', panels: ['sorted_samples', 'rofft_original', 'inva_corrected', 'tikhonov_coils'] },
+    recon_pair: { title: '两种重建对比', panels: ['inva_corrected', 'tikhonov_coils'] },
+    inva_corrected: { title: 'Phase Map + InvA', panels: ['inva_corrected'] },
+    tikhonov_coils: { title: 'Tikhonov', panels: ['tikhonov_coils'] },
+    sorted_samples: { title: '原始 ADC', panels: ['sorted_samples'] },
+    rofft_original: { title: 'RO FFT', panels: ['rofft_original'] },
+    scanner_preview: { title: '扫描仪原图', panels: ['scanner_preview'] },
+    uncorrected_pair: { title: '未做相位校正 · 两种重建对比', panels: ['inva_uncorrected', 'tikhonov_uncorrected'] },
+    inva_uncorrected: { title: 'InvA · 未做相位校正', panels: ['inva_uncorrected'] },
+    tikhonov_uncorrected: { title: 'Tikhonov · 未做相位校正', panels: ['tikhonov_uncorrected'] }
+  };
+  function element(tag, className, value) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (value != null) node.textContent = String(value);
+    return node;
+  }
+  function option(value, label) { const node = element('option', '', label); node.value = String(value); return node; }
+  function statusInfo(status, hasFrames = true) {
+    if (status === 'completed') return ['双方法完成', ''];
+    if (status === 'partial_reconstruction') return ['未做相位校正', 'partial'];
+    if (status === 'raw_unavailable' || !hasFrames) return ['无可用原始帧', 'unavailable'];
+    if (status === 'scanner_preview_only') return ['仅扫描仪预览', 'preview'];
+    if (status === 'preview_only') return ['仅预览', 'preview'];
+    if (status === 'completed_with_limitations') return ['结果有局限', 'partial'];
+    if (status === 'failed' || status === 'worker_failed') return ['重建未完成', 'unavailable'];
+    return [status || '状态未记录', 'preview'];
+  }
+  function badge(status, hasFrames = true) { const [label, style] = statusInfo(status, hasFrames); return element('span', `badge ${style}`, label); }
+  function panelFor(frame, key) { const panel = frame.panels && frame.panels[key]; return panel && panel.url ? panel : null; }
+  function warningText(value) {
+    if (typeof value === 'string') return value;
+    if (value && typeof value === 'object') return value.message || value.reason || JSON.stringify(value);
+    return String(value);
+  }
+  function warningsOf(item) { const list = item.warnings || []; return [...new Set((Array.isArray(list) ? list : [list]).map(warningText))]; }
+  function warningBox(values, title) {
+    if (!values.length) return null;
+    const box = element('div', 'notice quality-notice');
+    box.append(element('strong', '', title));
+    const list = element('ul');
+    values.forEach(value => list.append(element('li', '', value)));
+    box.append(list);
+    return box;
+  }
+  function scanAnchor(c) { return `scan-${encodeURIComponent(c.id)}`; }
+  function frameAnchor(c, f) { return `frame-${encodeURIComponent(c.id)}-s${integer(f.s)}-v${integer(f.v)}-e${integer(f.e)}`; }
+  function missingReason(key, c, frame) {
+    if (key === 'scanner_preview') return '此扫描没有可用的扫描仪原图。';
+    if (key === 'inva_uncorrected' || key === 'tikhonov_uncorrected') return '此帧未保存这一未校正结果。';
+    if (key === 'sorted_samples' || key === 'rofft_original') return frame.reason || c.reason || '此帧没有可读取的对应原始采样预览。';
+    return frame.reason || c.reason || '此帧未完成相位校正后的重建。可在“查看内容”中选择已有预览或未校正结果。';
+  }
+  function openZoom(c, frame, key, panel) {
+    setText('zoom-title', panelSpecs[key].title);
+    setText('zoom-context', `${c.experiment} / 扫描 ${c.scan_id} · Slice ${frame.s} · Volume ${frame.v} · Echo ${frame.e}`);
+    $('zoom-image').src = panel.url;
+    $('zoom-image').alt = `${panelSpecs[key].title}，扫描 ${c.scan_id}，Slice ${frame.s}，Volume ${frame.v}，Echo ${frame.e}`;
+    $('zoom-image').dataset.caseId = String(c.id);
+    $('zoom-image').dataset.frameId = String(frame.id);
+    setText('zoom-dimensions', `${(panel.shape || []).join(' × ')} 像素 · 独立设窗 · 原像素缩放`);
+    $('zoom-download').href = panel.url;
+    $('zoom-dialog').showModal();
+  }
+  function panelCard(c, frame, key) {
+    const spec = panelSpecs[key];
+    const panel = panelFor(frame, key);
+    const card = element('article', 'image-card');
+    card.dataset.panel = key;
+    card.dataset.panelKey = key;
+    const heading = element('div', 'panel-heading');
+    heading.append(element('h5', '', spec.title), element('p', '', spec.subtitle));
+    card.append(heading);
+    if (panel) {
+      const button = element('button', 'image-hit');
+      button.type = 'button';
+      button.setAttribute('aria-label', `放大 ${spec.title}，扫描 ${c.scan_id}，Slice ${frame.s}，Volume ${frame.v}，Echo ${frame.e}`);
+      const img = element('img');
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.alt = `${spec.title} · Slice ${frame.s}, Volume ${frame.v}, Echo ${frame.e}`;
+      img.src = panel.url;
+      img.addEventListener('error', () => { button.replaceChildren(element('span', 'muted', '图像文件不可读取')); button.disabled = true; }, { once: true });
+      button.append(img);
+      button.addEventListener('click', () => openZoom(c, frame, key, panel));
+      card.append(button);
+      const caption = element('div', 'panel-caption');
+      caption.append(element('span', '', panel.shape && panel.shape.length ? panel.shape.join(' × ') + ' px' : '原像素预览'), element('span', '', '点击放大 ↗'));
+      card.append(caption);
+    } else {
+      const placeholder = element('div', 'missing-panel');
+      placeholder.append(element('strong', '', '此帧未提供'), element('p', '', missingReason(key, c, frame)));
+      card.append(placeholder, element('div', 'panel-caption', '无对应图像'));
+    }
+    return card;
+  }
+  function frameRow(c, frame) {
+    const row = element('article', 'frame-row');
+    row.id = frameAnchor(c, frame);
+    Object.assign(row.dataset, { caseId: String(c.id), frameId: String(frame.id), slice: String(frame.s), volume: String(frame.v), echo: String(frame.e) });
+    const heading = element('div', 'frame-heading');
+    heading.append(element('h4', 'frame-coordinates', `Slice ${frame.s} · Volume ${frame.v} · Echo ${frame.e}`));
+    const actions = element('div', 'frame-actions');
+    actions.append(badge(frame.status));
+    if (frame.npz) { const link = element('a', 'npz-link', 'NPZ ↓'); link.href = frame.npz; link.setAttribute('download', ''); actions.append(link); }
+    if (frame.detail_url) { const link = element('a', 'detail-link', '原图集 ↗'); link.href = frame.detail_url; link.target = '_blank'; link.rel = 'noopener'; actions.append(link); }
+    heading.append(actions);
+    row.append(heading);
+    const grid = element('div', 'panel-grid');
+    grid.dataset.panels = String(views[state.view].panels.length);
+    views[state.view].panels.forEach(key => grid.append(panelCard(c, frame, key)));
+    row.append(grid);
+    const incomplete = !panelFor(frame, 'inva_corrected') || !panelFor(frame, 'tikhonov_coils');
+    if (incomplete) {
+      const partial = panelFor(frame, 'inva_uncorrected') || panelFor(frame, 'tikhonov_uncorrected');
+      const notice = element('div', 'notice frame-reason');
+      notice.append(element('span', '', partial ? '完整双方法重建尚不可用；“查看内容”可切换至未做相位校正的结果。' : '此帧仅提供可读取的预览，未完成双方法重建。'));
+      if (frame.reason || c.reason) notice.append(element('div', '', frame.reason || c.reason));
+      row.append(notice);
+    } else if (frame.reason) row.append(element('p', 'scan-meta frame-reason', frame.reason));
+    const warnings = warningBox(warningsOf(frame).filter(value => !warningsOf(c).includes(value)), '此帧质量提示');
+    if (warnings) row.append(warnings);
+    return row;
+  }
+  function scanSection(c) {
+    const frames = framesOf(c);
+    const section = element('section', 'scan-section');
+    section.id = scanAnchor(c);
+    section.dataset.caseId = String(c.id);
+    const header = element('div', 'scan-header');
+    const heading = element('div', 'case-heading');
+    const title = element('div');
+    title.append(element('h2', '', `扫描 ${c.scan_id ?? c.id}`));
+    const dimensions = frames.length ? `${indices(frames, 's').length} slices · ${indices(frames, 'v').length} volumes · ${indices(frames, 'e').length} echoes · 共 ${frames.length} 帧` : '无可用帧';
+    const matrix = Array.isArray(c.matrix) ? ` · ${c.matrix.join(' × ')} 矩阵` : '';
+    const fov = Array.isArray(c.fov_mm) ? ` · FOV ${c.fov_mm.join(' × ')} mm` : '';
+    title.append(element('div', 'scan-meta', dimensions + matrix + fov));
+    heading.append(title, badge(c.status, frames.length > 0));
+    header.append(heading, element('p', 'scan-id', c.id));
+    section.append(header);
+    const warnings = warningBox(warningsOf(c), '此扫描质量提示');
+    if (warnings) section.append(warnings);
+    if (!frames.length) {
+      const empty = element('div', 'empty-state');
+      empty.append(element('strong', '', '此扫描没有可展示的帧'));
+      empty.append(element('p', '', c.reason || (c.raw_status === 'empty' ? '原始信号文件为空。' : c.raw_status === 'missing' ? '原始信号文件缺失。' : '原始数据未能解码，且没有可读取的扫描仪预览。')));
+      section.append(empty);
+      return section;
+    }
+    for (const v of indices(frames, 'v')) {
+      const volumeFrames = frames.filter(f => integer(f.v) === v);
+      for (const e of indices(volumeFrames, 'e')) {
+        const groupFrames = volumeFrames.filter(f => integer(f.e) === e).sort((a, b) => integer(a.s) - integer(b.s));
+        const group = element('section', 'volume-group');
+        group.dataset.volume = String(v);
+        group.dataset.echo = String(e);
+        group.append(element('h3', 'volume-heading', `Volume ${v} · Echo ${e} · 全部 ${groupFrames.length} 层`));
+        groupFrames.forEach(frame => group.append(frameRow(c, frame)));
+        section.append(group);
+      }
+    }
+    return section;
+  }
+  function updateControlsHeight() { document.documentElement.style.setProperty('--controls-height', $('selection-controls').offsetHeight + 'px'); }
+  function scrollToAnchor(anchor) {
+    if (scrollRequest != null) cancelAnimationFrame(scrollRequest);
+    scrollRequest = requestAnimationFrame(() => {
+      scrollRequest = null;
+      updateControlsHeight();
+      let target = null;
+      if (anchor) {
+        const c = caseMap.get(String(anchor.case));
+        if (c && c.experiment === state.exp) {
+          if (anchor.s != null) {
+            const frame = framesOf(c).find(f => integer(f.s) === integer(anchor.s) && integer(f.v) === integer(anchor.v) && integer(f.e) === integer(anchor.e));
+            if (frame) target = $(frameAnchor(c, frame));
+          }
+          if (!target) target = $(scanAnchor(c));
+        }
+      }
+      if (target) target.scrollIntoView({ block: 'start', behavior: 'auto' });
+      else window.scrollTo({ top: 0, behavior: 'auto' });
+    });
+  }
+  function writeHash(mode = 'push') {
+    const params = new URLSearchParams({ exp: state.exp, view: state.view });
+    if (state.anchor) {
+      params.set('case', state.anchor.case);
+      if (state.anchor.s != null) { params.set('s', state.anchor.s); params.set('v', state.anchor.v); params.set('e', state.anchor.e); }
+    }
+    const hash = '#' + params.toString();
+    lastRenderedHash = hash;
+    if (location.hash === hash) return;
+    try { history[mode === 'replace' ? 'replaceState' : 'pushState'](null, '', hash); }
+    catch (_) { if (mode === 'replace') location.replace(hash); else location.hash = hash; }
+  }
+  function renderExperiment() {
+    const selectedCases = cases.filter(c => c.experiment === state.exp);
+    const frameCount = selectedCases.reduce((sum, c) => sum + framesOf(c).length, 0);
+    const unavailable = selectedCases.filter(c => !framesOf(c).length).length;
+    $('dataset-select').value = state.exp;
+    $('view-select').value = state.view;
+    $('scan-select').replaceChildren(option('', '选择扫描，直接跳转 ↓'), ...selectedCases.map(c => option(c.id, `扫描 ${c.scan_id ?? c.id} · ${framesOf(c).length} 帧${!framesOf(c).length ? ' · 无可用帧' : ''}`)));
+    $('scan-select').value = state.anchor ? state.anchor.case : '';
+    setText('experiment-caption', `本实验 ${selectedCases.length} 个扫描 · ${count(frameCount)} 帧全部展开${unavailable ? ' · ' + unavailable + ' 个扫描无可用帧' : ''} · 向下滚动查看`);
+    setText('experiment-name', state.exp);
+    setText('experiment-meta', '按扫描、Volume、Echo 分组；每一层均直接展示，索引从 0 开始。');
+    $('experiment-gallery').replaceChildren(...selectedCases.map(scanSection));
+    setText('live-status', `已展开 ${state.exp} 的全部 ${selectedCases.length} 个扫描、${frameCount} 帧`);
+    updateControlsHeight();
+    scrollToAnchor(state.anchor);
+  }
+  function visibleFrameAnchor() {
+    const controlsBottom = $('selection-controls').getBoundingClientRect().bottom;
+    if (window.scrollY < 100) return state.anchor;
+    for (const row of $('experiment-gallery').querySelectorAll('.frame-row')) {
+      if (row.getBoundingClientRect().bottom > controlsBottom + 10) return { case: row.dataset.caseId, s: row.dataset.slice, v: row.dataset.volume, e: row.dataset.echo };
+    }
+    return state.anchor;
+  }
+  function readHash() {
+    if (location.hash === lastRenderedHash) return;
+    const params = new URLSearchParams(location.hash.slice(1));
+    const c = caseMap.get(params.get('case'));
+    state.exp = experiments.includes(params.get('exp')) ? params.get('exp') : c ? c.experiment : defaultExperiment;
+    state.view = views[params.get('view')] ? params.get('view') : 'compare4';
+    state.anchor = null;
+    if (c && c.experiment === state.exp) {
+      state.anchor = { case: String(c.id) };
+      if (params.has('s') || params.has('slice')) Object.assign(state.anchor, { s: integer(params.get('s') ?? params.get('slice')), v: integer(params.get('v') ?? params.get('volume')), e: integer(params.get('e') ?? params.get('echo')) });
+    }
+    renderExperiment();
+    writeHash('replace');
+  }
+  $('dataset-select').append(...experiments.map(exp => option(exp, exp)));
+  $('view-select').append(...Object.entries(views).map(([key, view]) => option(key, view.title)));
+  const stats = data.stats || {};
+  setText('stat-experiments', count(stats.experiments || experiments.length));
+  setText('stat-cases', count(stats.cases || cases.length));
+  setText('stat-frames', count(stats.frames || cases.reduce((sum, c) => sum + framesOf(c).length, 0)));
+  setText('coverage-note', `全数据：双方法完成 ${count(stats.completed)} 帧 · 未校正 ${count(stats.partial)} 帧 · 预览 ${count(stats.preview)} 帧`);
+  $('archive-link').href = data.archive_url || 'archive.html';
+  $('dataset-select').addEventListener('change', () => { state.exp = $('dataset-select').value; state.anchor = null; renderExperiment(); writeHash(); });
+  $('scan-select').addEventListener('change', () => {
+    const c = caseMap.get($('scan-select').value);
+    if (!c || c.experiment !== state.exp) return;
+    state.anchor = { case: String(c.id) };
+    writeHash();
+    scrollToAnchor(state.anchor);
+  });
+  $('view-select').addEventListener('change', () => { state.anchor = visibleFrameAnchor(); state.view = $('view-select').value; renderExperiment(); writeHash(); });
+  $('zoom-close').addEventListener('click', () => $('zoom-dialog').close());
+  $('zoom-dialog').addEventListener('click', event => {
+    if (event.target === $('zoom-dialog')) { const r = $('zoom-dialog').getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) $('zoom-dialog').close(); }
+  });
+  $('zoom-dialog').addEventListener('close', () => $('zoom-image').removeAttribute('src'));
+  window.addEventListener('hashchange', readHash);
+  window.addEventListener('popstate', readHash);
+  window.addEventListener('resize', updateControlsHeight);
+  if ('ResizeObserver' in window) new ResizeObserver(updateControlsHeight).observe($('selection-controls'));
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+  readHash();
+})();
+</script>
+</body>
+</html>

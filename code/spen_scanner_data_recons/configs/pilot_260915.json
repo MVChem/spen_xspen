@@ -1,0 +1,11 @@
+{
+  "description": "Six representative single-shot, single-echo raw scans; reconstruct every slice and volume separately.",
+  "cases": [
+    {"id": "mouse96_fov16", "label": "鼠脑 96×96 / FOV 16 mm", "experiment_name": "20240321_204022_lxj_spen_mouse_240321_1_1_1", "scan_id": 15},
+    {"id": "mouse96_fov24", "label": "鼠脑 96×96 / FOV 24 mm", "experiment_name": "20240115_152140_lxj_SPEN_96_240115_1_1_1", "scan_id": 12},
+    {"id": "mouse80_fov24", "label": "鼠脑 80×80 / FOV 24 mm", "experiment_name": "20231207_221933_lxj_spen_mouse3_231207_1_1_1", "scan_id": 7},
+    {"id": "spen96_fov35", "label": "SPEN 96×96 / FOV 35 mm", "experiment_name": "20231011_130630_lxj_SPEN_data_231011_3_1_3", "scan_id": 12},
+    {"id": "pv5_five_slices", "label": "PV5 多层采集 / 5 层 × 4 通道", "experiment_name": "lxj_motionRARE_SPEN_230904.lG2", "scan_id": 16},
+    {"id": "water64_diffusion", "label": "水模 64×64 / b=0、650 s/mm²", "experiment_name": "20220721_095453_lxj_SPEN_diffusion_test_0721_water_1_1", "scan_id": 17, "regrid_flavor": "pv360"}
+  ]
+}
