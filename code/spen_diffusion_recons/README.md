@@ -10,10 +10,19 @@
 | `scripts/prior96/` | mouse96 strong prior、数据准备、训练锁及评估 |
 | `scripts/prior192/` | 192 网格数据准备、训练和 SPEN 超分辨率重建 |
 | `vendor/InverseBench/` | 算子基类及 DAPS 所需的最小上游源码和许可证 |
-| `archive/reference/` | 旧批处理、制图和下载源码，仅供查阅 |
 | `runs/` | 新产生的权重、运行日志、评估结果和数据准备输出，运行时创建 |
 
 没有复制数据、权重、实验记录、缓存、虚拟环境或 Git 历史。
+
+## 已确认的重建对照图
+
+[SPEN_Reconstruction_Comparison_260915](../../experiments/SPEN_Reconstruction_Comparison_260915/) 保存仿真及真实采集的两张 PNG，包含实验参数、指标约定和本地数据位置说明。
+
+- `scripts/prior192/rebuild_figures.py`：使用最终 192 网格先验完成仿真与真实重建。
+- `scripts/prior192/render_rebuilt.py`：从保存的 NPZ 重新绘制两张 PNG，无需重新推理。
+- `scripts/prior192/phase_inva.py`：相位拟合和传统加权 InvA 基线。
+
+默认运行目录为 `runs/rodent192_spen2x_260914/figures_260915/`。权重、原始数据及 NPZ 保留在本地，Git 仅收录确认图、说明与源码。
 
 ## 环境与入口
 
@@ -62,4 +71,4 @@ export SPEN_REFERENCE_ROOT=/home/data2/chk/workspace/2026/08/14/01_工作项目/
 
 测试检查实复数伴随、梯度、稠密参考 proximal 解、EDM 接口和训练锁。外部 scanner 参考未配置时，对应集成测试跳过。和其他两个项目分进程运行测试，避免历史脚本中 `model`、`data`、`operators` 等同名模块冲突。
 
-本轮验证了 CPU 测试和九个训练、评估、数据准备入口的 `--help`，未运行训练、完整评估或下载。`archive/reference/` 中保留原文的 `.py.reference` / `.m.reference` 不属于可执行入口；使用前须处理原实验目录依赖。
+本轮验证了 CPU 测试和九个训练、评估、数据准备入口的 `--help`，未运行训练、完整评估或下载。
