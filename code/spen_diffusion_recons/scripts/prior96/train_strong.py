@@ -7,6 +7,7 @@ import os
 import shutil
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
 import numpy as np
 import torch
@@ -21,12 +22,33 @@ from run_guard import acquire_run_lock
 from project_paths import RUNS, PRIOR96_DATA
 
 
+def accumulated_backward(model,net,data,local_batch,accumulation_steps,device):
+    """Average microbatch gradients before one clip/optimizer/EMA update."""
+    total=torch.zeros((),device=device)
+    for micro in range(accumulation_steps):
+        sync=model.no_sync() if isinstance(model,DDP) and micro<accumulation_steps-1 else nullcontext()
+        with sync:
+            x=data.sample(local_batch)
+            sigma=(torch.randn(len(x),1,1,1,device=device)*1.2-1.2).exp()
+            noisy=x+sigma*torch.randn_like(x)
+            pred=model(noisy,sigma)
+            weight=(sigma.square()+net.sigma_data**2)/(sigma*net.sigma_data).square()
+            loss=(weight*(pred-x).square()).mean()
+            if not torch.isfinite(loss):raise FloatingPointError('Nonfinite training loss')
+            (loss/accumulation_steps).backward()
+            total+=loss.detach()/accumulation_steps
+    return total
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--data',type=Path,default=PRIOR96_DATA)
     p.add_argument('--out',type=Path,default=RUNS/'prior96/strong_mouse96')
     p.add_argument('--steps',type=int,default=30000)
     p.add_argument('--local-batch',type=int,default=24)
+    p.add_argument('--accumulation-steps',type=int,default=1)
+    p.add_argument('--lr-schedule-steps',type=int,help='Cosine horizon; rat pretraining used 30000 but stopped at 5000')
+    p.add_argument('--data-protocol',choices=['mouse','rat_pretrain'],default='mouse')
     p.add_argument('--base-ch',type=int,default=64)
     p.add_argument('--lr',type=float,default=2e-4)
     p.add_argument('--seed',type=int,default=19)
@@ -37,9 +59,12 @@ def main():
     p.add_argument('--reference-checkpoint',type=Path,default=RUNS/'core/edm_rat96/best.pt',help='Rat96 baseline checkpoint required on a new run')
     p.add_argument('--init-from',type=Path,help='Initialize EMA weights from a prior stage; optimizer/validation reset')
     args=p.parse_args()
-    if min(args.steps,args.local_batch,args.save_every,args.sample_every)<=0:
+    if args.lr_schedule_steps is None:args.lr_schedule_steps=args.steps
+    if min(args.steps,args.local_batch,args.accumulation_steps,args.save_every,args.sample_every)<=0:
         raise ValueError('Steps, batch and checkpoint intervals must be positive')
+    if args.lr_schedule_steps<args.steps:raise ValueError('LR schedule must cover all training steps')
     rank=int(os.environ.get('RANK','0'));world=int(os.environ.get('WORLD_SIZE','1'))
+    global_batch=args.local_batch*world*args.accumulation_steps
     # Acquire before CUDA/DDP initialization, and retain ownership until rank 0 exits.
     run_lock=acquire_run_lock(args.out) if rank==0 else None
     local=int(os.environ.get('LOCAL_RANK','0'))
@@ -52,7 +77,7 @@ def main():
         else:dist.init_process_group('gloo')
     barrier=lambda:dist.barrier() if world>1 else None
     torch.manual_seed(args.seed)
-    data=PriorData(args.data,device)
+    data=PriorData(args.data,device,protocol=args.data_protocol)
     val,val_keys=data.validation(256)
     net=StrongPrior(base_ch=args.base_ch).to(device)
     optimizer=torch.optim.AdamW(net.parameters(),lr=args.lr,weight_decay=0.)
@@ -69,8 +94,13 @@ def main():
         ckpt=torch.load(args.resume,map_location=device,weights_only=False)
         if ckpt['model_config']!=net.config or ckpt['manifest_sha256']!=manifest_hash:
             raise ValueError('Resume model/data mismatch')
-        if ckpt['global_batch']!=args.local_batch*world:
+        if ckpt['global_batch']!=global_batch:
             raise ValueError('Exact resume requires the same global batch')
+        if ckpt.get('accumulation_steps',1)!=args.accumulation_steps:
+            raise ValueError('Exact resume requires the same gradient accumulation')
+        for key in ('lr_schedule_steps','data_protocol'):
+            if key in ckpt and ckpt[key]!=getattr(args,key):
+                raise ValueError(f'Resume {key} mismatch')
         net.load_state_dict(ckpt['model']);optimizer.load_state_dict(ckpt['optimizer'])
         if rank==0:ema.load_state_dict(ckpt['ema'])
         step0=ckpt['step'];best=ckpt['best_val']
@@ -85,7 +115,7 @@ def main():
         args.out.mkdir(parents=True,exist_ok=True)
         if (args.out/'latest.pt').exists() and not args.resume:raise FileExistsError('Existing run')
         config={k:str(v) if isinstance(v,Path) else v for k,v in vars(args).items()}
-        config.update(world_size=world,global_batch=args.local_batch*world,parameters=sum(p.numel() for p in net.parameters()),
+        config.update(world_size=world,global_batch=global_batch,parameters=sum(p.numel() for p in net.parameters()),
                       model=net.config,manifest_sha256=manifest_hash,validation_keys=val_keys,
                       data_counts=data.manifest['counts'],training_subjects=len(data.manifest['subjects']['train']),
                       objective='Unconditional EDM; no scanner-corrupted image as clean training target',
@@ -116,16 +146,11 @@ def main():
             print(json.dumps(dict(event='baseline',initial_model=initial_loss,v1_same_validation=old_loss)),flush=True)
     barrier();start=time.monotonic();losses=[]
     for step in range(step0+1,args.steps+1):
-        model.train();x=data.sample(args.local_batch)
-        sigma=(torch.randn(len(x),1,1,1,device=device)*1.2-1.2).exp()
-        noisy=x+sigma*torch.randn_like(x)
-        pred=model(noisy,sigma)
-        weight=(sigma.square()+net.sigma_data**2)/(sigma*net.sigma_data).square()
-        loss=(weight*(pred-x).square()).mean()
-        if not torch.isfinite(loss):raise FloatingPointError(f'nonfinite loss: {rank}/{step}')
-        lr=args.lr*min(step/500.,1.)*(.15+.85*.5*(1+math.cos(math.pi*step/args.steps)))
+        model.train()
+        lr=args.lr*min(step/500.,1.)*(.15+.85*.5*(1+math.cos(math.pi*step/args.lr_schedule_steps)))
         for group in optimizer.param_groups:group['lr']=lr
-        optimizer.zero_grad(set_to_none=True);loss.backward()
+        optimizer.zero_grad(set_to_none=True)
+        loss=accumulated_backward(model,net,data,args.local_batch,args.accumulation_steps,device)
         grad_norm=torch.nn.utils.clip_grad_norm_(net.parameters(),1.,error_if_nonfinite=True)
         optimizer.step()
         if rank==0:
@@ -138,7 +163,7 @@ def main():
             if world>1:dist.all_reduce(value);value/=world
             if rank==0:
                 row=dict(step=step,loss=float(value),grad_norm=float(grad_norm),lr=lr,
-                         images_seen=step*world*args.local_batch,elapsed_sec=time.monotonic()-start,
+                         images_seen=step*global_batch,elapsed_sec=time.monotonic()-start,
                          steps_per_sec=(step-step0)/(time.monotonic()-start))
                 print(json.dumps(row),flush=True)
                 with (args.out/'train_metrics.jsonl').open('a') as f:f.write(json.dumps(row)+'\n')
@@ -153,7 +178,9 @@ def main():
                 vl=validate(ema,val);improved=vl<best;best=min(best,vl)
                 checkpoint=dict(step=step,model_config=net.config,model=net.state_dict(),ema=ema.state_dict(),
                                 optimizer=optimizer.state_dict(),val_loss=vl,best_val=best,rng_states=states,
-                                manifest_sha256=manifest_hash,global_batch=world*args.local_batch)
+                                manifest_sha256=manifest_hash,global_batch=global_batch,
+                                accumulation_steps=args.accumulation_steps,
+                                lr_schedule_steps=args.lr_schedule_steps,data_protocol=args.data_protocol)
                 save_checkpoint(args.out/'latest.pt',checkpoint)
                 if improved:
                     save_checkpoint(args.out/'best.pt',checkpoint)
