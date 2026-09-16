@@ -14,6 +14,22 @@
 
 没有复制数据、权重、实验记录、缓存、虚拟环境或 Git 历史。
 
+## 96 网格训练与对比图
+
+- `scripts/prior96/train_pipeline.py`：单 GPU 两阶段训练，支持断点继续；完成后运行仿真评估。
+- `scripts/prior96/train_strong.py`：实际训练循环，支持梯度累积。
+- `scripts/prior96/evaluate_reconstruction.py`：指定 `--mode simulation` 或 `--mode real`，使用给定权重重建固定案例；通过 `--inputs` 指定数据与来源记录，输出到 `--out`。
+- `scripts/prior96/render_comparison.py`：读取评估目录内的 NPZ 和指标，重新导出紧凑布局的 PNG/PDF，无需 GPU。
+
+仿真图依次为 GT、输入、Tikhonov、Phase map + InvA、Diffusion；真实数据图省略 GT。Phase map + InvA 固定在倒数第二行，Diffusion 在最后一行。真实数据没有配对真值，不标注 PSNR/SSIM。
+
+在本目录、使用已安装项目依赖的 Python 环境重绘：
+
+```bash
+python scripts/prior96/render_comparison.py --run 'runs/<运行名>/evaluation' --kind simulation
+python scripts/prior96/render_comparison.py --run 'runs/<运行名>/evaluation_real' --kind real
+```
+
 ## 已确认的重建对照图
 
 [SPEN_Reconstruction_Comparison_260915](../../experiments/SPEN_Reconstruction_Comparison_260915/) 保存仿真及真实采集的两张 PNG，包含实验参数、指标约定和本地数据位置说明。

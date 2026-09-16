@@ -16,7 +16,8 @@ from model import load_prior
 from train import validate
 from operators import SpenMagnitudeOperator,scanner_matrices,synthetic_coils
 from solvers import diffpir
-from evaluate import metrics,average,unit,plot_synthetic
+from evaluate import metrics,average,unit
+from render_comparison import draw_comparison
 from project_paths import RUNS, PRIOR96_DATA
 
 SCANS={16:PROJECT/'data/mat/20240321_lxj_spen_mouse_240321_1_1_1',
@@ -120,7 +121,14 @@ def reconstruction(nets,args,out):
                 detail[name]=dict(subject_mean=subject_mean(rows,tr),cases=rows,seconds=time.monotonic()-start)
                 arrays[name]=unit(pred);outputs[name]=unit(pred)
             np.savez_compressed(out/f'{key}.npz',**arrays)
-            plot_synthetic(outputs,out/f'{key}.png')
+            display={name:values[:6].copy() for name,values in outputs.items()}
+            for name,values in display.items():
+                for i in range(len(values)):
+                    if tr[i]['rot180']:values[i]=np.rot90(values[i],2)
+            annotations={name:[f"{r['psnr']:.2f} / {r['ssim']:.3f}" for r in entry['cases'][:6]]
+                         for name,entry in detail.items()}
+            draw_comparison(display,out/key,[f'Case {i+1}' for i in range(len(next(iter(display.values()))))],
+                            annotations=annotations,row_labels={'Target':'Ground truth (GT)'})
             (out/f'{key}_metrics.json').write_text(json.dumps(dict(records=tr,methods=detail),indent=2)+'\n')
             summary[key]={k:v['subject_mean'] for k,v in detail.items()}
             print(json.dumps(dict(event='inverse_evaluation',case=key,**summary[key])),flush=True)
@@ -166,7 +174,15 @@ def scanner(nets,args,out):
             for key,x in row.items():images[key].append(np.rot90(unit(x)[0],2))
             np.savez_compressed(out/f'real_fov{fov}_{path.stem}.npz',observation=y.cpu().numpy(),**{k:unit(x)[0] for k,x in row.items()})
             report.append(meta)
-    plot_synthetic({k:np.stack(v) for k,v in images.items()},out/'real_mouse_comparison.png')
+    names=list(nets)
+    order=names[:-1]+['Phase + InvA']+names[-1:]
+    groups=[];start=0
+    for end in range(1,len(report)+1):
+        if end==len(report) or report[end]['fov_mm']!=report[start]['fov_mm']:
+            groups.append((start,end,f"FOV {report[start]['fov_mm']} mm"));start=end
+    draw_comparison({k:np.stack(images[k]) for k in order},out/'real_mouse_comparison',
+                    [f"Acquisition #{Path(r['path']).stem.split('_')[-1]}" for r in report],groups,
+                    row_labels={'Phase + InvA':'Phase map\n+ InvA'})
     (out/'real_mouse_metrics.json').write_text(json.dumps(dict(cases=report,
         note='No clean real SPEN ground truth. Coil/phase estimates are fixed from the existing phase-corrected InvA anchor, not independently measured. Noise=.02 and lambda=1 are assumptions, not tuned against a real target.'),indent=2)+'\n')
 
@@ -191,7 +207,7 @@ def main():
     nets={'V1 rat prior':old,'V2 mouse prior':new}
     snapshot=args.out/'source_snapshot';snapshot.mkdir()
     sources={}
-    for root,names in [(HERE,['evaluate_mouse.py','model_v2.py','tiny_unet_v2.py']),
+    for root,names in [(HERE,['evaluate_mouse.py','model_v2.py','tiny_unet_v2.py','render_comparison.py']),
                        (V1,['operators.py','solvers.py','evaluate.py','model.py','train.py','tiny_unet.py'])]:
         for name in names:
             destination=snapshot/(('v1_' if root==V1 else '')+name)

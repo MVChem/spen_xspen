@@ -1,4 +1,4 @@
-"""Run the original two-stage 0911 experiment from scratch on one GPU.
+"""Train the two-stage magnitude prior from scratch on one GPU.
 
 Restarting this launcher resumes saved local checkpoints and skips completed
 stages. A pipeline lock and the trainer's own lock exclude duplicate writers.
@@ -54,7 +54,7 @@ def main():
             old_weights='Rat V1 checkpoint is used only to print a validation baseline, never for initialization',
             pretraining='5000 optimizer steps; original rat augmentation/validation; cosine horizon 30000',
             mixed_training='30000 optimizer steps; 80% mouse / 20% rat sampling; best validation EMA',
-            evaluation='Frozen 0911 FOV16 observations, 60 DiffPIR steps, original validation-selected parameters',
+            evaluation='Frozen FOV16 observations, 60 DiffPIR steps, original validation-selected parameters',
             numerical_scope='Same protocol/effective batch; single-GPU RNG stream differs from four-rank training'))
         shutil.copyfile(args.inputs/'provenance.json', args.out/'input_provenance.json')
     state = dict(pid=os.getpid(), gpu_uuid=args.gpu)
@@ -98,7 +98,7 @@ def main():
             # Keep a failed partial evaluation intact, then use a fresh directory.
             if evaluation.exists():
                 evaluation.rename(args.out/f'evaluation_incomplete_{datetime.now().strftime("%Y%m%d_%H%M%S")}_{os.getpid()}')
-            run('evaluation', [sys.executable, '-u', str(HERE/'evaluate_weekly_0911.py'),
+            run('evaluation', [sys.executable, '-u', str(HERE/'evaluate_reconstruction.py'),
                                '--checkpoint', str(args.out/'mouse_mixed/model_ema.pt'),
                                '--inputs', str(args.inputs), '--out', str(evaluation)])
         state.update(status='complete', stage='complete', updated_utc=datetime.now(timezone.utc).isoformat())

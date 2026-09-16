@@ -1,8 +1,8 @@
-"""Evaluate a retrained prior against the frozen observations in the 0911 report.
+"""Evaluate a trained prior on frozen simulation and real scanner observations.
 
 Uses the original validation-selected inverse parameters, without retuning on
-test images. Raw RSS / PhaseMap rows are archived baselines on those observations;
-Tikhonov and the supplied diffusion checkpoint are recomputed here.
+test images. Simulation Raw RSS / PhaseMap rows are archived baselines on those
+observations; real-data baselines and the supplied prior are recomputed here.
 """
 import argparse
 import csv
@@ -13,53 +13,97 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import numpy as np
+import scipy.io
 import torch
 
 from model_v2 import load_strong_prior
-from evaluate_mouse import SCANS, cases, controlled_operator, observe, subject_mean
+from evaluate_mouse import SCANS, cases, controlled_operator, observe, subject_mean, real_case
 from evaluate import metrics, unit
 from prepare_data import sha256
 from solvers import diffpir
+from operators import scanner_matrices
+from render_comparison import render_simulation, render_real
 
 
 def write_json(path, value):
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + '\n')
 
 
-def comparison_figure(outputs, reports, out, label='Retrained diffusion'):
-    labels = [('target', 'Ground truth'), ('raw_rss', 'SPEN RSS'),
-              ('phase_inva', 'PhaseMap + InvA'), ('tikhonov', 'Tikhonov'),
-              ('diffusion', label)]
-    fig, axes = plt.subplots(5, 6, figsize=(13, 10.8))
-    for col in range(6):
-        key = 'fov16_R1' if col < 3 else 'fov16_R2'
-        i = (3, 8, 17)[col % 3]
-        record = reports[key]['records'][i]
-        for row, (method, label) in enumerate(labels):
-            ax = axes[row, col]
-            value = outputs[key][method][i]
-            if record['rot180']:
-                value = np.rot90(value, 2)
-            ax.imshow(value, cmap='gray', vmin=0, vmax=1, interpolation='nearest')
-            ax.set_xticks([]); ax.set_yticks([])
-            if col == 0:
-                ax.set_ylabel(label, fontsize=10)
-            if row == 0:
-                ax.set_title(f"{'Full sampling' if col < 3 else 'Half sampling'} | Mouse {col % 3 + 1}", fontsize=9)
-            else:
-                score = reports[key]['methods'][method]['cases'][i]
-                ax.set_title(f"{score['psnr']:.2f} dB / {score['ssim']:.4f}", fontsize=9)
-    fig.suptitle(f'0911 SPEN simulation | {label}', fontsize=13)
-    fig.tight_layout(rect=(0, .03, 1, .96))
-    fig.text(.5, .013, 'Same held-out slices and complex observations. RSS / PhaseMap: archived baselines; Tikhonov / diffusion: new inference.',
-             ha='center', fontsize=8)
-    fig.savefig(out/'comparison.png', dpi=200)
-    fig.savefig(out/'comparison.pdf')
-    plt.close(fig)
+@torch.no_grad()
+def evaluate_real(net, checkpoint, args):
+    """Original six real cases, using the new prior and unchanged scanner model."""
+    original = json.loads((args.inputs/'legacy_evaluation/real_mouse_metrics.json').read_text())
+    arrays = {k: [] for k in ('raw_rss', 'phase_inva', 'tikhonov', 'diffusion')}
+    rows = []
+    for case in original['cases']:
+        old_path = Path(case['path'])
+        path = args.scan_root/old_path.parent.name/old_path.name
+        if sha256(path) != case['sha256']:
+            raise ValueError(f'Scanner input differs from archived case: {path}')
+        op, y, anchor, meta = real_case(path, args.device)
+        key = f"real_fov{case['fov_mm']}_{path.stem}"
+        with np.load(args.inputs/'legacy_evaluation'/f'{key}.npz') as frozen:
+            observation_error = float(np.max(np.abs(y.cpu().numpy()-frozen['observation'])))
+        if observation_error > 2e-6:
+            raise ValueError(f'Real observation changed: {key}: {observation_error}')
+        predictions = {'phase_inva': anchor,
+                       'tikhonov': op.proximal(torch.full_like(anchor, -1), y, .003)}
+        predictions['diffusion'], trace = diffpir(net, op, y, steps=60,
+            sigma_noise=.02, lamb=1., seed=73)
+        raw = np.asarray(scipy.io.loadmat(path, variable_names=['spen_original_signal_rofft'])
+                         ['spen_original_signal_rofft'])
+        if raw.shape != (96, 96, 1, 4):
+            raise ValueError(f'Unexpected original signal axes: {raw.shape}')
+        signal = torch.tensor(raw[:, :, 0].transpose(2, 0, 1),
+                              dtype=torch.complex64, device=args.device)
+        _, encoding, _ = scanner_matrices(path, args.device)
+        smax = float(torch.linalg.svdvals(encoding).max())
+        response = op.forward(torch.ones_like(anchor))
+        raw_scale = float(response.abs().square().sum(1).sqrt()[0, 8:-8, 8:-8].median())
+        if raw_scale <= 0:
+            raise ValueError('Nonpositive unit-object response')
+        raw_rss = signal.abs().square().sum(0).sqrt()/(meta['magnitude_scale']*smax*raw_scale)
+        arrays['raw_rss'].append(np.rot90(raw_rss.cpu().numpy(), 2))
+        unscaled = {}
+        meta.update(fov_mm=case['fov_mm'], export_index=int(path.stem.split('_')[-1]),
+                    original_observation_max_error=observation_error,
+                    encoding_smax=smax, raw_rss_calibration_scale=raw_scale, methods={})
+        for method, value in predictions.items():
+            if not torch.isfinite(value).all():
+                raise FloatingPointError(f'{key}: {method}')
+            arrays[method].append(np.rot90(unit(value)[0], 2))
+            unscaled[method] = value.cpu().numpy()
+            meta['methods'][method] = dict(
+                measurement_nrmse=float(op.relative_residual(value, y)),
+                displayed_measurement_nrmse=float(op.relative_residual(value.clamp(-1, 1), y)))
+        np.savez_compressed(args.out/f'{key}.npz', observation=y.cpu().numpy(),
+                            **unscaled)
+        write_json(args.out/f'{key}_trace.json', trace)
+        rows.append(meta)
+        print(json.dumps(dict(event='real_case_complete', case=key)), flush=True)
+    payload = {k: np.stack(v) for k, v in arrays.items()}
+    payload.update(labels=np.asarray([f"Acquisition #{r['export_index']}" for r in rows]),
+                   fov_mm=np.asarray([r['fov_mm'] for r in rows]))
+    np.savez_compressed(args.out/'real.npz', **payload)
+    write_json(args.out/'real.json', dict(cases=rows, checkpoint_step=checkpoint['step'],
+        checkpoint_sha256=sha256(args.checkpoint), steps=60, seed=73,
+        rho=.003, lamb=1., sigma_noise=.02,
+        phase='Existing MAT scanner phase correction; weighted InvA and measurement-derived gain',
+        display='All rows rotate 180 degrees, fixed [0,1] window; native 96x96, no interpolation',
+        input='Original RO-FFT coil RSS, calibrated by unit-object response and the same measurement scale',
+        scope='Real acquired SPEN; no paired GT and no PSNR/SSIM'))
+    render_real(payload, args.out)
+    (args.out/'RESULTS.md').write_text(
+        '# SPEN 真实采集重建\n\n'
+        f"使用指定权重（第 {checkpoint['step']:,} 步 EMA），重建原先固定的 6 个真实采集案例。\n\n"
+        'FOV 16 mm：导出编号 13、22、30；FOV 24 mm：7、11、15。'
+        '各行依次为原始输入 RSS、Tikhonov、Phase map + InvA、Diffusion prior；'
+        '全部为原生 96×96，统一显示窗 [0,1]，显示时旋转 180°。\n\n'
+        'DiffPIR 为 60 步、λ=1、σ=0.02；Tikhonov ρ=0.003。'
+        '沿用原 MAT 相位校正、线圈/相位估计及幅度标度。'
+        '没有配对干净真值，不报告 PSNR/SSIM；测量残差见 real.json。\n\n'
+        '[真实数据对比图](real_comparison.png)\n')
 
 
 def main():
@@ -68,6 +112,9 @@ def main():
     p.add_argument('--inputs', type=Path, required=True)
     p.add_argument('--out', type=Path, required=True)
     p.add_argument('--device', default='cuda')
+    p.add_argument('--mode', choices=['simulation', 'real'], default='simulation')
+    p.add_argument('--scan-root', type=Path,
+                   default=Path(__file__).resolve().parents[3]/'data/spen_acquired_260915/mat')
     args = p.parse_args()
     SCANS[16] = args.inputs/'scanner_reference/data/mat/20240321_lxj_spen_mouse_240321_1_1_1'
     if args.out.exists() and any(args.out.iterdir()):
@@ -81,7 +128,7 @@ def main():
     old_config = json.loads((old/'config.json').read_text())
     checkpoint_hash = sha256(args.checkpoint)
     verification_only = checkpoint_hash == old_config['checkpoint_sha256']
-    label = 'Archived checkpoint check' if verification_only else 'Retrained diffusion'
+    label = 'Archived diffusion' if verification_only else 'Diffusion prior'
     net, checkpoint = load_strong_prior(args.checkpoint, args.device)
     manifest_hash = sha256(data/'manifest.json')
     assert checkpoint['manifest_sha256'] == manifest_hash == old_config['dataset_manifest_sha256']
@@ -89,11 +136,17 @@ def main():
         checkpoint=str(args.checkpoint.resolve()), checkpoint_sha256=checkpoint_hash,
         purpose='evaluator verification only' if verification_only else 'retrained model evaluation',
         checkpoint_step=checkpoint['step'], manifest_sha256=manifest_hash,
-        steps=60, seed=72, selection='Original validation-selected parameters, frozen before retraining',
+        mode=args.mode, steps=60, seed=72 if args.mode=='simulation' else 73,
+        selection='Original validation-selected simulation parameters; fixed real-data parameters',
         torch=torch.__version__, cuda=torch.version.cuda,
         visible_devices=os.environ.get('CUDA_VISIBLE_DEVICES'),
         started_utc=datetime.now(timezone.utc).isoformat(), command=sys.argv,
-        metric='Fixed range [0,1], all pixels for PSNR; Gaussian SSIM sigma=1.5, truncate=3.5, crop=5; subject-balanced mean'))
+        metric=('Fixed range [0,1], all pixels for PSNR; Gaussian SSIM sigma=1.5, truncate=3.5, crop=5; subject-balanced mean'
+                if args.mode=='simulation' else 'No paired GT; measurement residual only')))
+    if args.mode=='real':
+        evaluate_real(net, checkpoint, args)
+        write_json(args.out/'completed.json', dict(status='complete', completed_utc=datetime.now(timezone.utc).isoformat()))
+        return
     outputs, reports, summary, rows = {}, {}, {}, []
     for acceleration, noise in ((1, .01), (2, .02)):
         key = f'fov16_R{acceleration}'
@@ -142,8 +195,8 @@ def main():
         writer = csv.DictWriter(f, fieldnames=list(rows[0]))
         writer.writeheader(); writer.writerows(rows)
     write_json(args.out/'summary.json', summary)
-    comparison_figure(outputs, reports, args.out, label=label)
-    lines = ['# 0911 旧权重评估器校验（非重训结果）' if verification_only else '# 0911 仿真重训结果', '',
+    render_simulation(outputs, reports, args.out, label=label)
+    lines = ['# 旧权重评估器校验（非重训结果）' if verification_only else '# SPEN 仿真重训结果', '',
              '每种条件 15 只留出小鼠、30 张图；先在个体内平均，再对个体等权平均。', '',
              '| 条件 | 旧 Diffusion PSNR / SSIM | 本次推理 PSNR / SSIM |',
              '| --- | --- | --- |']
