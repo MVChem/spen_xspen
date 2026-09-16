@@ -198,7 +198,6 @@ def assemble(args):
         simulation_case_keys=old_sim['case_keys'], real_labels=old_real['labels'], real_fov_mm=old_real['fov_mm'])
     summary = dict(checkpoint_step=step, checkpoint_sha256=sha(args.out/'checkpoint.pt'),
         simulation={}, real=[], limitations=[
-            'Intermediate checkpoint, not the final 60000-step model.',
             'Latent nonlinear proximal and initialization differ from the pixel DiffPIR reference.',
             'All simulation cases are in prior training; real data have no paired ground truth.'])
     for condition in (0, 1):
