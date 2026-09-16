@@ -22,3 +22,11 @@ tmp/                      当前进展和供查看的临时材料
 notes/<主题>_YYMMDD.md     保留的笔记
 experiments/<主题>_YYMMDD/ 用户选取的重要实验结果
 ```
+
+
+这是老项目的folder /home/data2/chk/workspace/2026/08/14
+/home/data2/chk/workspace/2026/08/14/xSPEN_项目里面是别的实验室采集的数据和预处理
+
+/home/data2/chk/workspace/2026/08/14/xspen_diffusion_recons是我做的xspen的diffusion重建
+/home/data2/chk/workspace/2026/08/14/spen_diffusion_recons是我重构的diffusion的spen的重建，不一定能跑
+/home/data2/chk/workspace/2026/08/14/spen_recons非常混乱，包含spen传统深度学习的spen重建和diffusion重建以及flow model重建

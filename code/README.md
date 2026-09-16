@@ -3,11 +3,13 @@
 | 项目 | 职责与入口 |
 |---|---|
 | [data](data/README.md) | 共享数据入口、原始文件与来源记录；本机数据使用符号链接 |
+| [data_preprocessing](data_preprocessing/README.md) | 数据预处理：鼠脑切片、192 × 192 PNG 导出、来源记录与预览 |
+| [spen_scanner_data_recons](spen_scanner_data_recons/README.md) | Bruker 原始 SPEN 采集读取、Phase Map + InvA / Tikhonov 传统重建及图像展示 |
 | [spen_diffusion_recons](spen_diffusion_recons/README.md) | SPEN 的 96/192 先验训练、数据制备与重建；旧一次性脚本单独作为参考保留 |
 | [xspen_diffusion_recons](xspen_diffusion_recons/README.md) | xSPEN diffusion 训练与评价、原生分辨率、超分和真实数据处理流程 |
 | [spenpy](spenpy/README.md) | SPEN / xSPEN 物理模型、仿真、重建和数据读取基础库，当前版本 1.0.0 |
 
-三个目录均为实际源码副本，由根 Git 统一维护。`spenpy` 保持标准 Python 包结构；两套 diffusion 项目暂时保留各自的脚本入口，以便对照原实现。两项目存在 `model.py`、`data.py` 等同名模块，测试和脚本应在各自进程中运行，不要把它们一起加入同一个 `PYTHONPATH`。
+源码由根 Git 统一维护。`spenpy` 保持标准 Python 包结构；两套 diffusion 项目暂时保留各自的脚本入口，以便对照原实现。两项目存在 `model.py`、`data.py` 等同名模块，测试和脚本应在各自进程中运行，不要把它们一起加入同一个 `PYTHONPATH`。
 
 环境统一放在项目根 `.venv/`；依赖和运行入口见各项目的 README。输入数据和权重尚未迁入，常用 CLI 的 `--help` 可先检查参数；运行真实训练或重建前需提供实际输入路径，并选择新的输出目录。
 
