@@ -2,6 +2,8 @@
 
 [鼠类 MRI 数据与溯源](rodent_mri/README_260914.md) 收录实验室原始采集文件及公开数据的下载原件。
 
+[96×96 扩充鼠脑图片集](rodent96_expanded_260917/README.md) 保存 33,072 张 16 位灰度 PNG：`train/` 28,160 张、`val/` 2,632 张、`test/` 2,280 张。图片目录内只有 PNG，数据集根目录附 README；预处理入口是 [`expand_rodent96.py`](../data_preprocessing/expand_rodent96.py)。
+
 [192×192 鼠脑训练数据入口](rodent192_training_260915/README.md) 通过软链接提供本轮训练使用的全部 10,633 张 PNG、实际训练数组及逐图来源清单。
 
 [真实 SPEN / xSPEN 采集数据](spen_acquired_260915/README.md) 保存 45 组成像原始实验（751 个非空 SPEN/xSPEN 扫描）、2 组波谱实验和 501 份配套 MAT 的实体副本；另存 5 份待核实来源的历史 MAT 候选。附实验索引、逐扫描对应关系和 SHA256 清单，本轮已测试的 64 份 MAT 在清单中单独标记。

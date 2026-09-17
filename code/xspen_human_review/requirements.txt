@@ -1,0 +1,9 @@
+numpy
+scipy
+h5py
+torch
+twixtools
+matplotlib
+Pillow
+# Optional: browser verification (verify_gallery.py), requires local Chrome.
+playwright

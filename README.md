@@ -11,7 +11,9 @@ SPEN 与 xSPEN diffusion reconstruction 的统一工作项目。助手工作时�
 | [paper/](paper/README.md) | 论文源码、参考文献与正式配图 |
 | [周报/](周报/) | 周报及相关材料 |
 
-`tmp/` 一般在每次开始工作时为空，由用户手动清理，助手不自动删除其中的内容。
+项目根 `.venv` 是指向 `/home/data2/chk/workspace/2026/.venv` 的符号链接。训练与重建共用该环境；SPENPy 使用从 GitHub `MVChem/spenpy` 的 `v1.0.0` 安装的包。
+
+`tmp/` 仅在本地使用，不纳入 Git 跟踪或远程同步检查。一般在每次开始工作时为空，由用户手动清理，助手不自动删除其中的内容。
 
 notes 名称与 `experiments/` 下的实验文件夹名称均以六位日期 `YYMMDD` 结尾，例如 `重建观察_260914.md`、`重建对比_260914/`，其中 `260914` 表示 2026 年 9 月 14 日。
 

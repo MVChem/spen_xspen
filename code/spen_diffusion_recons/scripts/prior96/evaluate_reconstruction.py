@@ -8,6 +8,7 @@ import argparse
 import csv
 import json
 import os
+import shutil
 import sys
 import time
 from datetime import datetime, timezone
@@ -32,21 +33,67 @@ def write_json(path, value):
 
 @torch.no_grad()
 def evaluate_real(net, checkpoint, args):
-    """Original six real cases, using the new prior and unchanged scanner model."""
+    """Selected real acquisitions, using the unchanged native-96 scanner model."""
     original = json.loads((args.inputs/'legacy_evaluation/real_mouse_metrics.json').read_text())
+    archived = {(case['fov_mm'], Path(case['path']).name): case for case in original['cases']}
+    scans = {fov: args.scan_root/path.name for fov, path in SCANS.items()}
+    selections = [(fov, scans[fov]/f'slice_{index}.mat')
+                  for fov, indices in ((16, args.real16_ids), (24, args.real24_ids))
+                  for index in indices]
+    for _, path in selections:
+        if not path.is_file():
+            raise FileNotFoundError(path)
+    cached = {}
+    if args.reuse_real:
+        saved = json.loads((args.reuse_real/'real.json').read_text())
+        expected = dict(checkpoint_sha256=sha256(args.checkpoint), steps=60, seed=73,
+                        rho=.003, lamb=1., sigma_noise=.02)
+        for key, value in expected.items():
+            if saved.get(key) != value:
+                raise ValueError(f'Real cache has incompatible {key}')
+        with np.load(args.reuse_real/'real.npz', allow_pickle=False) as a:
+            if len(saved['cases']) != len(a['labels']):
+                raise ValueError('Real cache metadata and labels differ in length')
+            for method in ('raw_rss', 'phase_inva', 'tikhonov', 'diffusion'):
+                if a[method].shape != (len(saved['cases']), 96, 96) or not np.isfinite(a[method]).all():
+                    raise ValueError(f'Invalid cached real images: {method}')
+            for i, row in enumerate(saved['cases']):
+                if a['fov_mm'][i] != row['fov_mm'] or a['labels'][i] != f"Acquisition #{row['export_index']}":
+                    raise ValueError('Real cache order does not match metadata')
+                identity = (row['fov_mm'], f"slice_{row['export_index']}.mat")
+                if identity in cached:
+                    raise ValueError(f'Duplicate cached acquisition: {identity}')
+                cached[identity] = (row, {k: a[k][i].copy() for k in
+                                          ('raw_rss', 'phase_inva', 'tikhonov', 'diffusion')})
     arrays = {k: [] for k in ('raw_rss', 'phase_inva', 'tikhonov', 'diffusion')}
     rows = []
-    for case in original['cases']:
-        old_path = Path(case['path'])
-        path = args.scan_root/old_path.parent.name/old_path.name
-        if sha256(path) != case['sha256']:
+    for fov, path in selections:
+        case = archived.get((fov, path.name))
+        if case is not None and sha256(path) != case['sha256']:
             raise ValueError(f'Scanner input differs from archived case: {path}')
+        key = f'real_fov{fov}_{path.stem}'
+        if (fov, path.name) in cached:
+            meta, images = cached[(fov, path.name)]
+            if sha256(path) != meta['sha256']:
+                raise ValueError(f'Scanner input differs from cached case: {path}')
+            with np.load(args.reuse_real/f'{key}.npz', allow_pickle=False) as raw:
+                for method in ('phase_inva', 'tikhonov', 'diffusion'):
+                    display = np.rot90(((raw[method][0, 0]+1)/2).clip(0, 1), 2)
+                    np.testing.assert_array_equal(display, images[method])
+            for suffix in ('.npz', '_trace.json'):
+                shutil.copyfile(args.reuse_real/f'{key}{suffix}', args.out/f'{key}{suffix}')
+            for method in arrays:
+                arrays[method].append(images[method])
+            rows.append(dict(meta, path=str(path), reused_from=str(args.reuse_real.resolve())))
+            print(json.dumps(dict(event='real_case_reused', case=key)), flush=True)
+            continue
         op, y, anchor, meta = real_case(path, args.device)
-        key = f"real_fov{case['fov_mm']}_{path.stem}"
-        with np.load(args.inputs/'legacy_evaluation'/f'{key}.npz') as frozen:
-            observation_error = float(np.max(np.abs(y.cpu().numpy()-frozen['observation'])))
-        if observation_error > 2e-6:
-            raise ValueError(f'Real observation changed: {key}: {observation_error}')
+        observation_error = None
+        if case is not None:
+            with np.load(args.inputs/'legacy_evaluation'/f'{key}.npz') as frozen:
+                observation_error = float(np.max(np.abs(y.cpu().numpy()-frozen['observation'])))
+            if observation_error > 2e-6:
+                raise ValueError(f'Real observation changed: {key}: {observation_error}')
         predictions = {'phase_inva': anchor,
                        'tikhonov': op.proximal(torch.full_like(anchor, -1), y, .003)}
         predictions['diffusion'], trace = diffpir(net, op, y, steps=60,
@@ -66,7 +113,7 @@ def evaluate_real(net, checkpoint, args):
         raw_rss = signal.abs().square().sum(0).sqrt()/(meta['magnitude_scale']*smax*raw_scale)
         arrays['raw_rss'].append(np.rot90(raw_rss.cpu().numpy(), 2))
         unscaled = {}
-        meta.update(fov_mm=case['fov_mm'], export_index=int(path.stem.split('_')[-1]),
+        meta.update(fov_mm=fov, export_index=int(path.stem.split('_')[-1]),
                     original_observation_max_error=observation_error,
                     encoding_smax=smax, raw_rss_calibration_scale=raw_scale, methods={})
         for method, value in predictions.items():
@@ -88,16 +135,22 @@ def evaluate_real(net, checkpoint, args):
     np.savez_compressed(args.out/'real.npz', **payload)
     write_json(args.out/'real.json', dict(cases=rows, checkpoint_step=checkpoint['step'],
         checkpoint_sha256=sha256(args.checkpoint), steps=60, seed=73,
+        reused_cases=sum('reused_from' in r for r in rows),
+        fresh_inference_cases=sum('reused_from' not in r for r in rows),
         rho=.003, lamb=1., sigma_noise=.02,
         phase='Existing MAT scanner phase correction; weighted InvA and measurement-derived gain',
         display='All rows rotate 180 degrees, fixed [0,1] window; native 96x96, no interpolation',
         input='Original RO-FFT coil RSS, calibrated by unit-object response and the same measurement scale',
         scope='Real acquired SPEN; no paired GT and no PSNR/SSIM'))
     render_real(payload, args.out)
+    case_description = '；'.join(
+        f"FOV {fov} mm：导出编号 " + '、'.join(str(r['export_index']) for r in rows if r['fov_mm'] == fov)
+        for fov in (16, 24))
     (args.out/'RESULTS.md').write_text(
         '# SPEN 真实采集重建\n\n'
-        f"使用指定权重（第 {checkpoint['step']:,} 步 EMA），重建原先固定的 6 个真实采集案例。\n\n"
-        'FOV 16 mm：导出编号 13、22、30；FOV 24 mm：7、11、15。'
+        f"使用指定权重（第 {checkpoint['step']:,} 步 EMA），重建选定的 {len(rows)} 个真实采集案例。\n\n"
+        f"其中 {sum('reused_from' in r for r in rows)} 例复用同权重、同参数和同 MAT 的保存结果，其余重新推理。\n\n"
+        f'{case_description}。'
         '各行依次为原始输入 RSS、Tikhonov、Phase map + InvA、Diffusion prior；'
         '全部为原生 96×96，统一显示窗 [0,1]，显示时旋转 180°。\n\n'
         'DiffPIR 为 60 步、λ=1、σ=0.02；Tikhonov ρ=0.003。'
@@ -115,7 +168,16 @@ def main():
     p.add_argument('--mode', choices=['simulation', 'real'], default='simulation')
     p.add_argument('--scan-root', type=Path,
                    default=Path(__file__).resolve().parents[3]/'data/spen_acquired_260915/mat')
+    p.add_argument('--real16-ids', type=int, nargs='+', default=[5, 13, 22, 30, 38],
+                   help='FOV 16 mm MAT export numbers; default: 5 13 22 30 38')
+    p.add_argument('--real24-ids', type=int, nargs='+', default=[3, 7, 11, 15, 19],
+                   help='FOV 24 mm MAT export numbers; default: 3 7 11 15 19')
+    p.add_argument('--reuse-real', type=Path,
+                   help='Reuse matching cases from a saved real evaluation; infer only missing cases')
     args = p.parse_args()
+    for indices in (args.real16_ids, args.real24_ids):
+        if len(set(indices)) != len(indices) or any(i < 1 for i in indices):
+            p.error('Real acquisition numbers must be positive and unique within each FOV')
     SCANS[16] = args.inputs/'scanner_reference/data/mat/20240321_lxj_spen_mouse_240321_1_1_1'
     if args.out.exists() and any(args.out.iterdir()):
         raise FileExistsError('Use a fresh evaluation directory')
@@ -137,6 +199,8 @@ def main():
         purpose='evaluator verification only' if verification_only else 'retrained model evaluation',
         checkpoint_step=checkpoint['step'], manifest_sha256=manifest_hash,
         mode=args.mode, steps=60, seed=72 if args.mode=='simulation' else 73,
+        real_case_selection={'16': args.real16_ids, '24': args.real24_ids} if args.mode=='real' else None,
+        reuse_real=str(args.reuse_real.resolve()) if args.reuse_real else None,
         selection='Original validation-selected simulation parameters; fixed real-data parameters',
         torch=torch.__version__, cuda=torch.version.cuda,
         visible_devices=os.environ.get('CUDA_VISIBLE_DEVICES'),

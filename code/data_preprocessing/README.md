@@ -1,6 +1,44 @@
 # 数据预处理
 
-共享数据预处理项目。源码直接放在本目录，后续预处理也在这里扩展；每次处理的产物和记录写入本项目 `runs/`。
+共享数据预处理项目。源码直接放在本目录，后续预处理也在这里扩展。96 × 96 扩充图片集放在 `../data/`；其他处理产物和实验记录写入本项目 `runs/`。
+
+## 96 × 96 扩充图片集
+
+`expand_rodent96.py` 保留旧 `mouse_mixed` 的原始像素和 train/val/test 划分，向训练集补入实验室脑部 RARE，以及尚未使用的公开结构像。三个图片目录只放 PNG，当前数据集根目录另附 README：
+
+```text
+../data/rodent96_expanded_260917/
+  README.md
+  train/*.png
+  val/*.png
+  test/*.png
+```
+
+```bash
+cd code/data_preprocessing
+../../.venv/bin/python expand_rodent96.py --out ../data/rodent96_expanded_260917
+```
+
+输出路径必须是 `code/data/` 下尚不存在的新目录；重新生成时换一个新目录。`--dry-run` 仅检查来源，`--legacy` 和 `--raw` 可指定旧训练集及原始数据目录。脚本仅读取现有 JSON/NPY 以保留旧像素、识别已有扫描及排除验证/测试动物；不输出 JSON、NPY、NIfTI、MAT、缓存或原始采集文件。计数及排除原因打印到终端。成功前图片暂存于同级 `.partial` 目录，全部完成后才改为最终目录名。
+
+新增图采用原生切片、每体积正值 q99.5 灰度归一化、保持物理比例的前景裁剪和抗混叠缩小；不放大、不补边，不复制增强视图。原生 120 × 160 等低于 192 的实验室数据可用于这次 96 导出。保留 12% 栈端筛除和既有公开来源窗口，排除低信号、裁框不完整及完全相同的输出像素。实验室扫描按原始重建哈希去重，回波分别读取。
+
+`VISUAL_EXCLUSIONS` 保存人工预览确认有严重重影的两组原始重建哈希，所有回波整组排除。其余自动筛选仍不能代替逐切片人工质检；部分栈端图在体积统一灰度窗口下较暗。
+
+新增数据只进入 `train/`，原 `val/test` 逐像素保持原样。公开来源按已有跨库动物映射及 COMR 分组排除原验证/测试动物，也不再次处理旧数据中已有的原始体积。实验室 M0427 与 `RAREImage1.mat` 参考同源，整组排除；运动实验、覆盖或方向待核的扫描、身体/肿瘤及 CEST 不进入此批次。实验室 `RAT` 目录的物种标签尚不能逐一扫描确认，文件名前缀 `lab-RAT` 仅表示来源集合，不能据此称为纯小鼠或纯大鼠。
+
+图片为 **96 × 96 单通道 16 位 PNG**，读取用 `np.asarray(Image.open(path), dtype=np.float32) / 65535`；不要用 `convert('L')` 或默认的 8 位 RGB 转换。文件名保留来源、subject、原切片号/旧数组下标及回波或视图。旧图不重新归一化或裁剪，新增图的处理方式与旧图有所不同。原 `prior96/train_strong.py` 仍使用旧 JSON/NPY 数据接口；此脚本只负责图片集预处理，不启动训练。
+
+`build_png_gallery.py` 直接扫描三个图片目录，生成包含全部图片的离线 HTML。支持划分、旧/新增数据、来源、序列筛选、文件名搜索、分页跳转和逐张放大查看。预览页放在数据目录之外，不向图片目录写入其他文件：
+
+```bash
+../../.venv/bin/python build_png_gallery.py \
+  --data ../data/rodent96_expanded_260917 \
+  --out ../../experiments/rodent96_preview_260917/index.html \
+  --asset-mode symlink
+```
+
+按用户要求，`--asset-mode symlink` 将 HTML 同级的 `images/<数据集名称>/` 链接到 `code/data/` 中的原图目录，不复制 PNG。聊天预览不能跟随跨目录符号链接，因此使用同级 `preview_tiles/` 中的轻量 8 位 JPEG 拼图显示全部图片，原始 16 位 PNG 不受影响。分享预览时带上 HTML 和 `preview_tiles/`；原图访问还需要符号链接的目标目录。图片增删后重新运行上述命令。另保留 `--asset-mode copy` 独立复制模式。
 
 ## 192 × 192 鼠脑 PNG
 

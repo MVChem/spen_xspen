@@ -1,0 +1,243 @@
+{
+  "selection_basis": "8 known human crossed-chirp scans; 10 observations covering axial/sagittal/coronal, nominal 3/4 mm sampling, protocol fields 600/1000, R=46/48/60 and two within-slice occurrence contrasts. Input-only anatomy review; not selected by reconstruction quality. Indices are zero-based.",
+  "cases": [
+    {
+      "scan": "MID112",
+      "slice": 37,
+      "occurrence": 0,
+      "reason": "3 mm 轴位，中央脑实质；与下一例观察同层不同时序"
+    },
+    {
+      "scan": "MID112",
+      "slice": 37,
+      "occurrence": 8,
+      "reason": "3 mm 轴位，同一层中间采集时序，观察信号与噪声差异"
+    },
+    {
+      "scan": "MID114",
+      "slice": 32,
+      "occurrence": 0,
+      "reason": "3 mm 矢状位，近中线结构"
+    },
+    {
+      "scan": "MID27",
+      "slice": 18,
+      "occurrence": 0,
+      "reason": "约 4 mm 轴位，R=46；来自另一扫描会话"
+    },
+    {
+      "scan": "MID51",
+      "slice": 23,
+      "occurrence": 9,
+      "reason": "约 4 mm 矢状位，R=46；中间采集时序"
+    },
+    {
+      "scan": "MID613",
+      "slice": 29,
+      "occurrence": 8,
+      "reason": "4 mm 轴位，R=48，协议字段 b=600，层内方向与 MID106 不同"
+    },
+    {
+      "scan": "MID615",
+      "slice": 23,
+      "occurrence": 0,
+      "reason": "4 mm 冠状位，补足第三种采集平面"
+    },
+    {
+      "scan": "MID106",
+      "slice": 17,
+      "occurrence": 8,
+      "reason": "4 mm 轴位，较低层面，R=48、协议字段 b=1000"
+    },
+    {
+      "scan": "MID108",
+      "slice": 23,
+      "occurrence": 0,
+      "reason": "4 mm 矢状位，R=48；与下一例观察同层不同时序"
+    },
+    {
+      "scan": "MID108",
+      "slice": 23,
+      "occurrence": 15,
+      "reason": "4 mm 矢状位，同一层末次采集时序"
+    }
+  ],
+  "hybrid_spen": {
+    "status": "visualized_all_16_related_scans",
+    "related_inventory": {
+      "file_relative_to_project": "runs/unified_review_260916/inventory/hybrid_inventory.json",
+      "scope": "旧 xSPEN_项目中，原始头明确为 esrs_hyb_spen_Diff2 的文件；其他历史 hybrid 序列未计入。",
+      "raw_scan_files": 16,
+      "raw_bytes": 4043021312,
+      "same_stem_mat_files": 13,
+      "groups": {
+        "Trio_full_brain_folder": 4,
+        "Trio_cerebellum": 8,
+        "GoogleDrive_50slice": 4
+      },
+      "independence_note": "扫描文件数不等于独立受试者数；50slice 的解剖部位未核实。额外轴按旧数组保留，尚未全部对应到 shot/重复/扩散条件。MID1496 实际只记录 6 层、1 个 Rep，头部计划 10 层、10 次采集。"
+    },
+    "scan": "MID253",
+    "sequence_family": "hybrid_spen_diff2",
+    "sequence_name": "esrs_hyb_spen_Diff2",
+    "encoding_model": "quadratic_phase",
+    "reason": "保留用户指定的旧 MID253 图像，统一页面展示全部 40 层 × 4 volume 的逐帧重建前后对照，默认打开 MATLAB 第 20 层。",
+    "classification_note": "旧目录、脚本和图题沿用 xSPEN 名称；原始 .dat 头与重建代码确认是 Hybrid SPEN。应使用对应的二次相位算子。",
+    "pipeline_note": "review.py 保留 crossed-chirp xSPEN 提取与重建流程，expand_scans.py 按相同算法扩展全部 6,812 个保留帧。Hybrid SPEN 仍复用已有 PE 重建；缺 MAT 的 3 份显示 RO-only 输入。build_unified.py 输出统一离线 HTML。",
+    "source_raw": "/home/data2/chk/workspace/2026/08/14/xSPEN_项目/08_Eddy_Human_xSPEN_DTI/Trio_brain/full brain/meas_MID253_esrs_40slices_Q60_Ortho900_FID48808.dat",
+    "reconstruction_mat": "/home/data2/chk/workspace/2026/08/14/01_工作项目/xspen_recons/outputs/xspen_raw_reconstruction.mat",
+    "reconstruction_script": "/home/data2/chk/workspace/2026/08/14/01_工作项目/xspen_recons/reconstruct_xspen.m",
+    "model_audit": "/home/data2/chk/workspace/2026/08/14/01_工作项目/xspen_recons/diagnostics/20260908_model_audit/README.md",
+    "geometry": {
+      "shape_pe_ro_coil_slice_volume": [
+        60,
+        64,
+        32,
+        40,
+        4
+      ],
+      "fov_mm_pe_ro": [
+        180,
+        192
+      ],
+      "slice_thickness_mm": 3,
+      "echo_time_ms": 52,
+      "r_value": 60
+    },
+    "array_reference": {
+      "before_variable": "SmatBeforePhaseMapInvA",
+      "after_variable": "Smat",
+      "reconstructed_coils_variable": "SignalFixedPostROFFTPostSR",
+      "matlab_magnitude_axis_order": [
+        "PE",
+        "RO",
+        "slice",
+        "volume"
+      ],
+      "h5py_magnitude_axis_order": [
+        "volume",
+        "slice",
+        "RO",
+        "PE"
+      ],
+      "slice_index_reference": "旧重建 MAT 中按 sliceOrder 排序后的层序；不是原始 MDH slice counter。",
+      "before_stage": "原始数据读取预处理和 automatic SPEN shift 后的 RO FFT + RSS，尚未做 PE PhaseMap + InvA；不是未经处理的 ADC。",
+      "after_stage": "Hybrid SPEN 奇偶 PhaseMap 校正、二次相位加窗 InvA、线圈 RSS。"
+    },
+    "index_base": 0,
+    "volume_label_source": "旧 reconstruct_xspen.m 的 directionLabels；Trio_brain/CalcbMat_NewBrainMS.m 的 DWI 分支对应 b0、RO、PE、SS 四种设置。",
+    "cases": [
+      {
+        "scan": "MID253",
+        "slice": 19,
+        "volume": 0,
+        "label": "b0",
+        "reason": "旧图第 1 列；MATLAB 第 20 层、第 1 个 volume"
+      },
+      {
+        "scan": "MID253",
+        "slice": 19,
+        "volume": 1,
+        "label": "DWI-RO",
+        "reason": "旧图第 2 列；MATLAB 第 20 层、第 2 个 volume"
+      },
+      {
+        "scan": "MID253",
+        "slice": 19,
+        "volume": 2,
+        "label": "DWI-PE/SPEN",
+        "reason": "旧图第 3 列；MATLAB 第 20 层、第 3 个 volume"
+      },
+      {
+        "scan": "MID253",
+        "slice": 19,
+        "volume": 3,
+        "label": "DWI-SS",
+        "reason": "旧图第 4 列；MATLAB 第 20 层、第 4 个 volume"
+      }
+    ],
+    "existing_visualizations": {
+      "all_volumes_middle_slice": "/home/data2/chk/workspace/2026/08/14/01_工作项目/xspen_recons/outputs/xspen_raw_all_volumes_middle_slice.png",
+      "b0_all_slices": "/home/data2/chk/workspace/2026/08/14/01_工作项目/xspen_recons/outputs/xspen_raw_b0_all_slices.png"
+    },
+    "visualization": {
+      "entry_html": "runs/unified_review_260916/index.html#MID253",
+      "scan_ids": [
+        "MID201",
+        "MID212",
+        "MID247",
+        "MID253",
+        "MID1494",
+        "MID1496",
+        "MID1498",
+        "MID1500",
+        "MID1503",
+        "MID1505",
+        "MID1507",
+        "MID1509",
+        "MID48",
+        "MID50",
+        "MID52",
+        "MID54"
+      ],
+      "all_slices_and_extra_axes": true,
+      "paired_scan": "MID253",
+      "raw_only_scans": [
+        "MID201",
+        "MID247",
+        "MID1496"
+      ],
+      "incomplete_acquisition": "MID1496",
+      "output_policy": "新产物写入本项目 runs/，查看入口放 tmp/。"
+    }
+  },
+  "visualization": {
+    "entry_html": "runs/unified_review_260916/index.html",
+    "builder": [
+      "build_unified.py",
+      "expand_scans.py",
+      "catalog_all.py",
+      "import_bruker.py",
+      "import_bruker_reference.py",
+      "finalize_catalog.py"
+    ],
+    "crossed_observations": 10,
+    "hybrid_scans": 16,
+    "hybrid_primary_frames": 1898,
+    "index_note": "xSPEN slice/occurrence 与原始 counter 从 0 编号；页面切片位置从 1 编号。",
+    "crossed_scans": 8,
+    "crossed_primary_frames": 6812,
+    "total_primary_frames": 8710,
+    "crossed_scan_ids": [
+      "MID112",
+      "MID114",
+      "MID27",
+      "MID51",
+      "MID613",
+      "MID615",
+      "MID106",
+      "MID108"
+    ],
+    "scope": "核心 xSPEN_项目的可读数值影像和压缩包；另含旧 Bruker SPEN 结果、FLASH 工具参考、历史导出图。逐项覆盖与排除原因见 coverage.html。",
+    "excluded_raw_slice_counters": {
+      "MID27": [
+        4,
+        28
+      ]
+    },
+    "selected_entries_note": "10 个选例为同一批扫描的快捷对照入口，不重复计入 8,710 帧。",
+    "interface": "浅色简洁界面，按数据类型筛选、全文来源搜索、分页、切片/附加轴切换、连续浏览、选例跳转和点击放大；大型数组按需加载。",
+    "dataset_count": 2049,
+    "archive_entries": 1482,
+    "archive_array_frames": 383317,
+    "bruker_scans": 543,
+    "bruker_primary_frames": 921,
+    "legacy_figure_count": 91,
+    "coverage_html": "runs/unified_review_260916/coverage.html",
+    "coverage_json": "runs/unified_review_260916/inventory/source_coverage.json",
+    "verified_comparison_primary_frames": 8710,
+    "reference_scan_count": 145,
+    "reference_primary_frames": 939,
+    "excluded_raw_slice_counters_note": "These counters are excluded only in the old MID27 H5 comparison export. The ADC catalogue includes the actual recorded blocks from the complete DAT."
+  }
+}

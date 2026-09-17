@@ -1,4 +1,5 @@
-# Install the sibling spenpy project separately in a fresh environment.
+# Tagged SPENPy release; reconstruction retains spenpy._legacy.core operators.
+spenpy @ git+https://github.com/MVChem/spenpy.git@v1.0.0
 numpy>=1.24
 torch>=2.2
 scipy>=1.10

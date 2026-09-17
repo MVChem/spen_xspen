@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SPEN / xSPEN · 数据浏览</title>
+  <link rel="stylesheet" href="viewer.css">
+  <script src="manifest.js" defer></script><script src="archive_pixels.js" defer></script><script src="viewer.js" defer></script>
+</head>
+<body>
+  <header class="masthead"><a class="brand" href="#overview">SPEN / xSPEN <span>数据浏览</span></a><span class="offline">本地数据</span></header>
+  <div class="layout">
+    <aside>
+      <label class="search"><span>⌕</span><input id="search" type="search" placeholder="搜索扫描、变量、来源…" aria-label="搜索数据"></label>
+      <nav id="filters" aria-label="数据分类"></nav><nav class="catalog-links"><a href="legacy_figures.html">旧导出图 ↗</a><a href="coverage.html">数据覆盖 ↗</a></nav>
+      <div class="side-label scans-label">扫描</div><nav id="entry-nav" aria-label="扫描导航"></nav>
+      <div class="side-note">原始网格 · 保留采集维度</div>
+    </aside>
+    <main>
+      <section id="overview">
+        <h1>数据浏览</h1><p class="intro" id="stats"></p>
+        <div class="section-bar"><h2 id="collection-title">全部扫描</h2><span id="result-count"></span></div>
+        <div id="cards" class="cards"></div><p id="empty-state" hidden>没有匹配的数据。</p><div id="catalog-pages" class="pagination" hidden><button id="catalog-prev">上一页</button><span id="catalog-page-label"></span><button id="catalog-next">下一页</button></div>
+        <details class="collection-note"><summary>数据范围与覆盖清单</summary><p id="scope-note"></p><p><a href="coverage.html">查看覆盖说明 ↗</a> · <a href="inventory/source_coverage.json" target="_blank">逐文件记录 ↗</a> · <a href="inventory/archive_container_coverage.json" target="_blank">压缩包检查记录 ↗</a></p><p>xSPEN 与 Hybrid SPEN 使用不同编码模型。资料库另外收录参考扫描、定量图和数值数组，按来源独立展示。条目数和帧数不等于独立受试者数量。</p><p>默认独立灰度窗；有符号数组保留正负数值。未确认物理 FOV 的数组按像素比例显示。不同处理流程的亮度不用于直接定量比较。</p></details>
+      </section>
+      <section id="detail" hidden>
+        <div class="detail-top"><a href="#overview">← 返回列表</a><div><button id="prev-entry" title="上一份数据">←</button><button id="next-entry" title="下一份数据">→</button></div></div>
+        <div class="detail-heading"><div><div class="eyebrow" id="detail-family"></div><h1 id="detail-title"></h1></div><a id="full-scan-link" hidden>浏览完整扫描 ↗</a></div>
+        <p id="detail-subtitle" class="intro"></p><div id="facts" class="facts"></div>
+        <div id="bookmarks" class="bookmarks" hidden></div><div id="notice" class="notice"></div>
+        <div id="loading" role="status">正在读取图像…</div>
+        <div id="viewer" hidden>
+          <div class="controls"><div id="axis-controls" class="axis-controls"></div>
+            <details id="display-settings" class="display-settings"><summary>显示设置</summary><div class="display-controls">
+              <label>灰度窗<select id="window-mode"><option value="frame">每帧独立</option><option value="shared">当前对照图共用</option><option value="scan">同阶段全扫描共用</option></select></label>
+              <label class="range-label">窗宽 <output id="width-value">1.00×</output><input id="window-width" type="range" min="0.2" max="2.5" step="0.05" value="1"></label>
+              <label class="range-label">Gamma <output id="gamma-value">1.00</output><input id="gamma" type="range" min="0.4" max="2" step="0.05" value="1"></label>
+              <label class="check"><input type="checkbox" id="show-adc">显示原始 ADC</label><button id="reset-display">重置</button>
+            </div></details>
+          </div>
+          <div class="image-toolbar"><p class="view-caption" id="view-caption"></p><span>点击图像放大</span></div><div id="stage-grid" class="stage-grid"></div>
+          <section id="film-section" class="film-section"><div class="section-bar"><h2>连续浏览</h2><div class="film-options"><label>展开<select id="film-axis"></select></label><label>图像<select id="film-stage"></select></label></div></div><div id="filmstrip" class="filmstrip"></div><div id="film-pages" class="pagination" hidden><button id="film-prev">上一组</button><span id="film-page-label"></span><button id="film-next">下一组</button></div></section>
+        </div>
+        <details class="source-box"><summary>数据来源与方法</summary><div id="metadata"></div></details>
+      </section>
+      <footer>供数据检查与重建对照。灰度窗和 Gamma 只改变显示，不修改保存数组。</footer>
+    </main>
+  </div>
+  <dialog id="image-modal"><div class="modal-header"><span id="modal-title"></span><button id="modal-close" aria-label="关闭放大图">×</button></div><div class="modal-image"><canvas id="modal-canvas"></canvas></div><p id="modal-caption"></p></dialog>
+</body>
+</html>

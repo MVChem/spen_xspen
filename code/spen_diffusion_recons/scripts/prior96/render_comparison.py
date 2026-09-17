@@ -12,7 +12,9 @@ import matplotlib.pyplot as plt
 from matplotlib import font_manager, patheffects
 import numpy as np
 
-CASE_IDS = (3, 8, 17)
+# Keep the original three examples and add a held-out animal from ds002868.
+# Selection is fixed by identity, not reconstruction scores.
+CASE_IDS = (3, 8, 17, 15)
 CONDITIONS = ('fov16_R1', 'fov16_R2')
 METHODS = ('target', 'raw_rss', 'tikhonov', 'phase_inva', 'diffusion')
 ROW_LABELS = {'target': 'Ground truth (GT)', 'raw_rss': 'Degraded input',
@@ -90,11 +92,32 @@ def draw_comparison(images, output_stem, labels, groups=(), annotations=None,
             plt.close(fig)
 
 
-def render_simulation(outputs, reports, out, label='Diffusion prior'):
+def select_indices(indices, count):
+    """Validate explicit zero-based selections without silently dropping cases."""
+    indices = list(range(count) if indices is None else indices)
+    if not indices or len(set(indices)) != len(indices):
+        raise ValueError('Select at least one case, without duplicate indices')
+    if any(i < 0 or i >= count for i in indices):
+        raise ValueError(f'Case indices must be between 0 and {count - 1}: {indices}')
+    return indices
+
+
+def render_simulation(outputs, reports, out, label='Diffusion prior', case_ids=CASE_IDS):
+    """Show the same selected held-out cases under both sampling conditions."""
+    records = reports[CONDITIONS[0]]['records']
+    case_ids = select_indices(case_ids, len(records))
+    for key in CONDITIONS:
+        if reports[key]['records'] != records:
+            raise ValueError(f'{key}: simulation records differ between conditions')
+        for method in METHODS:
+            if len(outputs[key][method]) != len(records):
+                raise ValueError(f'{key}/{method}: images do not match records')
+            if method != 'target' and len(reports[key]['methods'][method]['cases']) != len(records):
+                raise ValueError(f'{key}/{method}: metrics do not match records')
     images = {method: [] for method in METHODS}
     annotations = {method: [] for method in METHODS if method != 'target'}
     for key in CONDITIONS:
-        for index in CASE_IDS:
+        for index in case_ids:
             record = reports[key]['records'][index]
             for method in METHODS:
                 value = outputs[key][method][index]
@@ -102,23 +125,42 @@ def render_simulation(outputs, reports, out, label='Diffusion prior'):
                 if method in annotations:
                     score = reports[key]['methods'][method]['cases'][index]
                     annotations[method].append(f"{score['psnr']:.2f} / {score['ssim']:.3f}")
-    return draw_comparison({k: np.stack(v) for k, v in images.items()},
-        Path(out)/'comparison', ['Mouse 1', 'Mouse 2', 'Mouse 3']*2,
-        [(0, 3, 'Full PE · σ = 0.01'), (3, 6, 'Random 50% PE · σ = 0.02')],
+    count = len(case_ids)
+    paths = draw_comparison({k: np.stack(v) for k, v in images.items()},
+        Path(out)/'comparison', [f'Mouse {i+1}' for i in range(count)]*2,
+        [(0, count, 'Full PE · σ = 0.01'), (count, 2*count, 'Random 50% PE · σ = 0.02')],
         annotations, {'diffusion': label})
+    selection = dict(case_indices=case_ids, conditions=list(CONDITIONS),
+        cases=[dict(label=f'Mouse {i+1}', index=index, record=records[index],
+                    metrics={key: {method: reports[key]['methods'][method]['cases'][index]
+                                   for method in METHODS[1:]} for key in CONDITIONS})
+               for i, index in enumerate(case_ids)])
+    (Path(out)/'simulation_selection.json').write_text(
+        json.dumps(selection, indent=2, ensure_ascii=False)+'\n')
+    return paths
 
 
-def render_real(arrays, out):
+def render_real(arrays, out, case_ids=None):
     """Real arrays are already oriented for display; no GT-based metrics."""
+    case_ids = select_indices(case_ids, len(arrays['labels']))
+    if any(len(arrays[k]) != len(arrays['labels']) for k in (*METHODS[1:], 'fov_mm')):
+        raise ValueError('Real images and FOVs must match labels')
+    arrays = {k: np.asarray(arrays[k])[case_ids] for k in (*METHODS[1:], 'labels', 'fov_mm')}
     fovs = arrays['fov_mm']
     groups, start = [], 0
     for end in range(1, len(fovs)+1):
         if end == len(fovs) or fovs[end] != fovs[start]:
             groups.append((start, end, f'FOV {fovs[start]:g} mm'))
             start = end
-    return draw_comparison({k: arrays[k] for k in METHODS if k != 'target'},
+    paths = draw_comparison({k: arrays[k] for k in METHODS if k != 'target'},
                            Path(out)/'real_comparison',
                            [str(s) for s in arrays['labels']], groups)
+    selection = dict(case_indices=case_ids,
+        cases=[dict(index=index, label=str(label), fov_mm=float(fov))
+               for index, label, fov in zip(case_ids, arrays['labels'], fovs)])
+    (Path(out)/'real_selection.json').write_text(
+        json.dumps(selection, indent=2, ensure_ascii=False)+'\n')
+    return paths
 
 
 def main():
@@ -126,6 +168,10 @@ def main():
     p.add_argument('--run', type=Path, required=True, help='Directory with saved evaluation arrays')
     p.add_argument('--kind', choices=['simulation', 'real', 'all'], default='all')
     p.add_argument('--out', type=Path, help='Defaults to the evaluation directory')
+    p.add_argument('--case-ids', type=int, nargs='+', default=CASE_IDS,
+                   help='Simulation array indices (zero-based); default: 3 8 17 15')
+    p.add_argument('--real-case-ids', type=int, nargs='+',
+                   help='Real array indices (zero-based); default: all saved cases')
     args = p.parse_args()
     out, paths = args.out or args.run, {}
     if args.kind in ('simulation', 'all') and (args.run/'fov16_R1.npz').exists():
@@ -137,11 +183,11 @@ def main():
         config = json.loads((args.run/'config.json').read_text())
         label = ('Archived diffusion' if 'verification' in config.get('purpose', '')
                  else 'Diffusion prior')
-        paths['simulation'] = render_simulation(outputs, reports, out, label)
+        paths['simulation'] = render_simulation(outputs, reports, out, label, args.case_ids)
     if args.kind in ('real', 'all') and (args.run/'real.npz').exists():
         with np.load(args.run/'real.npz', allow_pickle=False) as a:
             arrays = {k: a[k] for k in (*METHODS[1:], 'labels', 'fov_mm')}
-        paths['real'] = render_real(arrays, out)
+        paths['real'] = render_real(arrays, out, args.real_case_ids)
     if not paths or (args.kind != 'all' and args.kind not in paths):
         raise FileNotFoundError(f'No {args.kind} arrays in {args.run}')
     print(json.dumps(paths, default=str))
