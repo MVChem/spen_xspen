@@ -12,6 +12,10 @@ dist/
 .coverage
 htmlcov/
 
+# JavaScript dependencies and Julia package caches
+node_modules/
+.julia/
+
 # Local machine settings
 .env
 .env.*

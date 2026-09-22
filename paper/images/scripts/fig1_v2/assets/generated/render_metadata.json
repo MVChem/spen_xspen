@@ -1,0 +1,11 @@
+{
+  "residual_phase_limit_rad": 0.3,
+  "coil_phase_range_rad": [
+    -3.141592653589793,
+    3.141592653589793
+  ],
+  "measurement_log_compression": 30.0,
+  "measurement_q995_scale": 0.643522243797778,
+  "coil_image_rss_q995_scale": 1.0000002682209006,
+  "normalization": "No phase smoothing or anatomy masking. Colorbars generated from the same colormaps and value ranges as the maps."
+}

@@ -1,0 +1,26 @@
+Use case: scientific-educational.
+Create a polished scientific methods figure titled "SPEN Diffusion Reconstruction". Landscape approximately 16:10, white background, publication-quality flat vector-like diagram, crisp readable English labels, ample whitespace. Restrained blue for learned image prior, teal for acquisition physics, purple for phase and coil maps, orange for data consistency. Thin clean arrows, consistent sans-serif typography, no decorative AI icons. MRI thumbnails are schematic grayscale rodent brain cross-sections, not experimental results. Phase thumbnails use smooth cyclic color, never face images.
+
+Organize as two primary horizontal panels plus a generous physics inset inside the lower panel. Prioritize readability over dense text.
+Panel (a), upper 25%: "Training the magnitude prior". Left-to-right: clean magnitude MRI x0 -> "Add Gaussian noise", equation "xσ = x0 + σε" -> noisy MRI xσ -> blue U-Net block "Dθ(xσ, σ)" -> denoised estimate. Show clean target linked to loss beneath the output: "L = E[w(σ) ||Dθ(xσ,σ) − x0||²]". Small label: "Unconditional EDM training". An arrow labelled "Freeze trained weights" connects this U-Net to the sampling denoiser below. Acquisition physics is NOT part of training.
+
+Panel (b), lower 70%: "Physics-constrained sampling".
+At upper left of this panel, show measured complex multi-coil SPEN data y with a small acquisition-grid thumbnail and the explicit subtitle "After scanner phase correction and RO FFT". Branch to a compact purple calibration strip: "Weighted InvA" -> complex coil images zc -> "Ŝc = zc / RSS(z)" -> small purple magnitude-and-phase map thumbnails. Label "Fixed complex coil fractions: coil + object phase". Small subordinate note "Interpolate and normalize for finer grids". Make clear these maps are derived from measurements, not independent ground-truth sensitivity maps. InvA is a weighted adjoint, not an exact inverse.
+Main sampling path: "Gaussian initialization xT" -> "Frozen denoiser Dθ" -> "Clean estimate x̂0" -> orange "Data consistency" -> "Diffusion update" -> "Reconstruction". Draw a clear loop from diffusion update back to the denoiser labelled "Repeat as σ decreases". Link observation y and the physics operator inset into Data consistency. Beneath data consistency display only the compact equation:
+"xDC = arg min_x ||F(x) − y||² + ρσ ||x − x̂0||²".
+The denoiser predicts normalized real magnitude x; actual nonnegative magnitude is m=(x+1)/2.
+
+Make the physics inset large and central, labelled "What the SPEN degradation operator does". Show the exact sequential chain with distinct boxes:
+"m = (x+1)/2" -> "× Ŝc" -> "A_PE: SPEN encoding" -> "D_RO: RO band limitation" -> "M: acquired PE rows" -> "Predicted complex data".
+Below chain render "Fc(x) = M D_RO A_PE[Ŝc (x+1)/2]".
+Link the purple calibration maps directly to the "× Ŝc" box.
+Under A_PE put tiny matrix thumbnail and short annotation "Same scanner trajectory".
+Under D_RO show a 1D spectrum with central band highlighted, label "Retain acquired bandwidth".
+Under M show horizontal retained and missing rows, label "Full or undersampled PE".
+Add a short example label "Example: 192 × 192 image grid → 96 × 96 acquisition". Do not claim doubled true resolution.
+The measured domain is after readout FFT; do not label it ordinary Cartesian k-space or replace SPEN encoding by a generic 2D FFT.
+
+At the bottom right, place a small, visibly separate purple DASHED inset titled "Experimental extension: phase refinement". It should not interrupt or replace the solid baseline path. Include a smooth phase thumbnail and labels "Fit residual odd/even phase from measured data", "Even rows: exp(iφ); odd rows: 1", "Update phase during sampling; prior stays frozen". One short operator equation "Fφ,c(x) = M{exp(iEφ) ⊙ D_RO A_PE[Ŝc m]}". E inserts phase on original even scanner rows BEFORE PE masking. Use a dashed purple connector to the physics inset labelled "Optional". This is a separate experimental variant, not a standard step in baseline and not a second compulsory correction.
+Footer key, small but readable: "Blue: learned prior   Teal: fixed physics   Purple: phase / coil estimates   Orange: measurement consistency".
+
+Scientific constraints: Distinguish Gaussian noising in training from acquisition degradation in inference. Do not draw phase maps as inputs to the trained denoiser. Do not imply joint training of U-Net and phase maps. Do not depict InvA as a true inverse. Do not include numerical results, performance claims, ground-truth real scanner images, VAE or DiT. Avoid large prose blocks, tangled arrows, excessive gradients, 3D styling, and spelling errors.

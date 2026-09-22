@@ -28,9 +28,9 @@ MODELS = {
     'unet96': dict(checkpoint='retrain_0911_260916/mouse_mixed/model_ema.pt', step=30000,
                    label='U-Net', detail='96 x 96 | 14.43M',
                    training='18,037 mixed images; 5k rat pretraining + 30k mixed steps'),
-    'dit96': dict(checkpoint='rodent96_dit20m_260917/training/model_ema.pt', step=60000,
-                  label='Pixel DiT', detail='96 x 96 | 20.73M',
-                  training='28,160 expanded images; 60k steps'),
+    'dit96': dict(checkpoint='rodent96_dit_balanced_260917/training/model_ema.pt', step=60000,
+                  label='Pixel DiT (balanced)', detail='96 x 96 | 20.73M',
+                  training='28,160 expanded images; balanced_v1 sampling; 60k steps'),
     'vae_dit192': dict(checkpoint='rodent192_latent_dit_260915/train/model_ema.pt', step=60000,
                        label='VAE + DiT', detail='192 x 192 | DiT 129.53M',
                        training='10,633 images; 60k steps; all_data_no_holdout'),
@@ -88,13 +88,13 @@ def render(out, args, results):
     import matplotlib.pyplot as plt
 
     plt.rcParams.update({'font.family': 'DejaVu Sans', 'pdf.fonttype': 42, 'font.size': 10})
-    arrays = {key: np.load(out / key / 'samples.npz')['images_unit'] for key in MODELS}
+    arrays = {key: np.load(out / key / 'samples.npz')['images_unit'] for key in results}
     for start in range(0, args.count, 8):
         indices = list(range(start, min(start + 8, args.count)))
         for matched in (False, True):
             fig, axes = plt.subplots(3, len(indices), figsize=(2 * len(indices) + 2.2, 7.3), squeeze=False)
             fig.subplots_adjust(left=.13, right=.99, top=.84, bottom=.09, wspace=.025, hspace=.06)
-            for row, (key, model) in enumerate(MODELS.items()):
+            for row, (key, model) in enumerate(results.items()):
                 images = common96(arrays[key]) if matched else arrays[key]
                 for col, index in enumerate(indices):
                     ax = axes[row, col]
@@ -116,7 +116,7 @@ def render(out, args, results):
             fig.savefig(stem.with_suffix('.png'), dpi=180, facecolor='white')
             fig.savefig(stem.with_suffix('.pdf'), facecolor='white')
             plt.close(fig)
-    for key, model in MODELS.items():
+    for key, model in results.items():
         rows = (args.count + 7) // 8
         fig, axes = plt.subplots(rows, 8, figsize=(16, rows * 2.1 + 1), squeeze=False)
         fig.subplots_adjust(left=.02, right=.98, top=.89, bottom=.04, wspace=.035, hspace=.16)

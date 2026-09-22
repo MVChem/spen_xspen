@@ -1,0 +1,261 @@
+{
+  "training_record": {
+    "num": 824,
+    "filename": "824_ds005236-sub-06-sl007_T2w-TurboRARE.png",
+    "image": "images/824_ds005236-sub-06-sl007_T2w-TurboRARE.png",
+    "dataset": "ds005236",
+    "subject": "Farmer_1570_12m",
+    "species": "mouse",
+    "sequence": "T2w-TurboRARE",
+    "source_id": "ds005236_sub-06",
+    "source_path": "/home/data2/chk/workspace/2026/09/14/spen_xspen/code/data/rodent_mri/public_rodent_mri/ds005236/sub-06/anat/sub-06_T2w.nii.gz",
+    "source_sha256": "ba6d6b280fdd65bf251be6983c426f1bd2d2f2f1680a17e078089e638233ec51",
+    "slice_index": 7,
+    "echo_index": null,
+    "echo_time_ms": null,
+    "transform": {
+      "native_plane_shape": [
+        256,
+        256
+      ],
+      "native_spacing_yx": [
+        0.05859703095966806,
+        0.05859375
+      ],
+      "native_fov_yx": [
+        15.000839925675024,
+        15.0
+      ],
+      "square_fov": 13.242928996884983,
+      "output_pixel_spacing": 0.06897358852544262,
+      "output_shape": [
+        192,
+        192
+      ],
+      "bit_depth": 16,
+      "output_spacing_yx": [
+        0.06897358852544261,
+        0.0689697265625
+      ],
+      "sampling_yx": [
+        1.1770833333333333,
+        1.1770833333333333
+      ],
+      "offset_yx": [
+        1.0885416666666714,
+        30.177083333333357
+      ],
+      "upsampled": false,
+      "scale_yx": [
+        0.8495575221238939,
+        0.8495575221238939
+      ],
+      "antialias_sigma_yx": [
+        0.08854166666666663,
+        0.08854166666666663
+      ],
+      "interpolation": "linear; Gaussian antialias only on downsampled axes",
+      "normalization_window": [
+        0.0,
+        14370.0
+      ],
+      "normalization": "per-source positive q99.5",
+      "crop_mode": "foreground",
+      "crop": "foreground-centered physical square; no artificial padding",
+      "crop_margin": 0.1,
+      "crop_center_yx": [
+        113.5,
+        142.58854166666669
+      ],
+      "crop_bounds_yx": [
+        [
+          0.5000000000000048,
+          29.58854166666669
+        ],
+        [
+          226.5,
+          255.58854166666669
+        ]
+      ],
+      "foreground_bbox_yx": [
+        [
+          64,
+          58
+        ],
+        [
+          164,
+          246
+        ]
+      ],
+      "crop_detection_threshold": 0.35165831446647644,
+      "crop_detection_sigma": 2.0,
+      "crop_detection": "slice smooth q99 * 0.4; opening; largest and substantial nearby components",
+      "foreground_retained_fraction": 1.0,
+      "crop_detector_is_brain_segmentation": false,
+      "crop_margin_limited_by_fov": false,
+      "added_padding": false,
+      "direct_native_crop": false,
+      "spacing_near_isotropic_tolerance": 0.0001,
+      "spacing_relative_anisotropy": 5.599504500164443e-05
+    },
+    "qc": {
+      "finite_fraction": 1.0,
+      "foreground_fraction": 0.4109649658203125,
+      "largest_component_fraction": 0.3898162841796875,
+      "normalized_std": 0.20952735841274261,
+      "normalized_p99": 1.0
+    },
+    "pixel_sha256": "b5a475df53f4b7cc01b4e981fc10e0af3a72b7c336ef0303b5c0506b290e6b72",
+    "png_sha256": "e035ba6c427d9ce0424d5925dee74b18ac58c9d491aaee18f451a324b0d82ccb",
+    "subject_group": "Farmer_1570_12m",
+    "original_subject": "sub-06",
+    "split_group": "Farmer_1570_12m",
+    "split": "train",
+    "source": "/home/data2/chk/workspace/2026/08/14/01_工作项目/spen_recons/diffusion_inverse_20260908/v2_strong_prior/mouse_raw/ds005236/sub-06/anat/sub-06_T2w.nii.gz",
+    "png_path": "/home/data2/chk/workspace/2026/09/14/spen_xspen/code/data_preprocessing/runs/rodent_brain192_native_crop_260914/images/824_ds005236-sub-06-sl007_T2w-TurboRARE.png",
+    "key": "native192:ds005236_sub-06:sl007",
+    "view": "native_crop192",
+    "slice_axis": 2,
+    "source_plane_key": "ba6d6b280fdd65bf251be6983c426f1bd2d2f2f1680a17e078089e638233ec51:2:7",
+    "physical_plane_key": "ba6d6b280fdd65bf251be6983c426f1bd2d2f2f1680a17e078089e638233ec51:2:7",
+    "source_manifest_index": 823,
+    "hr_shape": [
+      192,
+      192
+    ],
+    "native_plane_shape": [
+      256,
+      256
+    ],
+    "native_plane_spacing_mm": [
+      0.05859703095966806,
+      0.05859375
+    ],
+    "hr_pixel_spacing_mm": [
+      0.06897358852544261,
+      0.0689697265625
+    ],
+    "fov_mm": 13.242928996884983,
+    "sample_weight": 0.0002690341673392521,
+    "original_split": "train",
+    "original_split_index": 649
+  },
+  "training_array_index": 823,
+  "training_sigma": 0.35,
+  "training_noise_seed": 20260922,
+  "checkpoint": "code/spen_diffusion_recons/runs/rodent192_spen2x_260914/train/model_ema.pt",
+  "checkpoint_sha256": "38e528762fe30cc2e20437568f672c50e60a6987682709da6339a5cc305e05a9",
+  "checkpoint_step": 60000,
+  "cases": [
+    {
+      "fov": 16,
+      "export": 22,
+      "mat": "code/data/spen_acquired_260915/mat/20240321_lxj_spen_mouse_240321_1_1_1/slice_22.mat",
+      "mat_sha256": "7afc1ce21b85661f2fec1443348e800065bd854b043b9c4bbb128080e9051fad",
+      "saved_run": "code/spen_diffusion_recons/runs/joint_phase_diffpir_260916/gpu1_real_residual/real_residual_fov16_export22.npz",
+      "saved_run_sha256": "8c1e7d50227e1b9a4be94cfda69aefee3d775a53b0ca8790d903212279aa532b",
+      "metadata": {
+        "path": "/home/data2/chk/workspace/2026/09/14/spen_xspen/code/data/spen_acquired_260915/mat/20240321_lxj_spen_mouse_240321_1_1_1/slice_22.mat",
+        "full_args": [
+          -294.5243112740438,
+          1.6,
+          96.0,
+          0.0,
+          1.0,
+          0.0,
+          0.8
+        ],
+        "image_size": 192,
+        "acquired_pe": 96,
+        "encoding_native_smax": 0.13363279402256012,
+        "matrix_shape": [
+          96,
+          192
+        ],
+        "normalization": "Both PE matrices divided by spectral norm of native A96",
+        "readout": "centered IFFT -> central band -> FFT; cell-center phase; sqrt(M/N) unitary scaling",
+        "source_sha256": "7afc1ce21b85661f2fec1443348e800065bd854b043b9c4bbb128080e9051fad",
+        "raw_shape": [
+          96,
+          96,
+          1,
+          4
+        ],
+        "magnitude_scale": 279356896.0,
+        "source_encoding_smax": 0.13363279402256012,
+        "scalar_gain": [
+          94.19829559326172,
+          0.2744140326976776
+        ],
+        "anchor96_measurement_nrmse": 0.12598201632499695,
+        "nuisance": "Fixed InvA-derived complex fractions, bilinearly interpolated and RSS-normalized at192. They are not independently acquired coil maps.",
+        "display": "All methods use the SAME original anchor magnitude scale and [0,1] window; rotate180 for display only."
+      },
+      "phase_range_rad": [
+        -0.22914011776447296,
+        0.08952204883098602
+      ]
+    },
+    {
+      "fov": 24,
+      "export": 11,
+      "mat": "code/data/spen_acquired_260915/mat/20240115_lxj_SPEN_96_240115_1_1_1/slice_11.mat",
+      "mat_sha256": "ebea53b6d77527e2dd6c5b5a358d38e4edb97a47d532c8de3e23b19456b5efed",
+      "saved_run": "code/spen_diffusion_recons/runs/joint_phase_diffpir_260916/gpu1_real_residual/real_residual_fov24_export11.npz",
+      "saved_run_sha256": "07c09e01204b57cb06e9b0701be935e5a21da33bb5e0ed7296aa8e9eaa52f020",
+      "metadata": {
+        "path": "/home/data2/chk/workspace/2026/09/14/spen_xspen/code/data/spen_acquired_260915/mat/20240115_lxj_SPEN_96_240115_1_1_1/slice_11.mat",
+        "full_args": [
+          -130.8996938995748,
+          2.4,
+          96.0,
+          0.0,
+          1.0,
+          0.0,
+          0.8
+        ],
+        "image_size": 192,
+        "acquired_pe": 96,
+        "encoding_native_smax": 0.20044924318790436,
+        "matrix_shape": [
+          96,
+          192
+        ],
+        "normalization": "Both PE matrices divided by spectral norm of native A96",
+        "readout": "centered IFFT -> central band -> FFT; cell-center phase; sqrt(M/N) unitary scaling",
+        "source_sha256": "ebea53b6d77527e2dd6c5b5a358d38e4edb97a47d532c8de3e23b19456b5efed",
+        "raw_shape": [
+          96,
+          96,
+          1,
+          4
+        ],
+        "magnitude_scale": 404995168.0,
+        "source_encoding_smax": 0.20044924318790436,
+        "scalar_gain": [
+          41.76707077026367,
+          0.13727006316184998
+        ],
+        "anchor96_measurement_nrmse": 0.10921813547611237,
+        "nuisance": "Fixed InvA-derived complex fractions, bilinearly interpolated and RSS-normalized at192. They are not independently acquired coil maps.",
+        "display": "All methods use the SAME original anchor magnitude scale and [0,1] window; rotate180 for display only."
+      },
+      "phase_range_rad": [
+        -0.20022207498550415,
+        0.16407833993434906
+      ]
+    }
+  ],
+  "selected_case": "FOV16 export22",
+  "baseline": "image_scanner: saved 60-step diffusion with fixed scanner correction and fixed coil factors",
+  "coil_phase": "angle of exactly the 192x192 complex coil fractions used by the operator; not independent sensitivity calibration",
+  "residual_phase": "phase_joint from saved corrected-input joint phase run, shape 48x96; acquired-even row by RO; no anatomical mask",
+  "sampling_clean_estimate": "Additional single CPU evaluation D_theta(2*image_scanner-1, sigma=0.02), illustrative; not a saved sampler intermediate",
+  "orientation": "Real image-space thumbnails rotate180 for display; observation, predicted data, encoding and residual phase retain native acquisition array orientation",
+  "magnitude_window": [
+    0,
+    1
+  ],
+  "phase_colormap": "coil: twilight_shifted [-pi,pi]; residual: coolwarm with symmetric range rounded up to nearest 0.1 rad",
+  "note": "No original reference-image crop contributes to the rebuilt figure. Training noise and initialization noise are reproducible synthetic Gaussian arrays."
+}

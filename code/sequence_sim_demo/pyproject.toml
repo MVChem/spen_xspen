@@ -1,0 +1,16 @@
+[project]
+name = "sequence-sim-demo"
+version = "0.1.0"
+description = "Reproducible PyPulseq EPI waveform and Bloch simulation demos"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "komamripy==0.0.11",
+    "pypulseq==1.5.0.post1",
+    "numpy>=1.26,<3",
+    "scipy>=1.13,<2",
+    "matplotlib>=3.9,<4",
+    "nibabel>=5.3,<6",
+]
+
+[tool.uv]
+package = false
