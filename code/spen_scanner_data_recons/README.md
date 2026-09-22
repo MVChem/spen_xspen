@@ -1,5 +1,7 @@
 # SPEN 原始采集全量重建
 
+新版白色工作台（FastAPI + React）：见 [启动说明](web/README.md)。支持实验搜索、连续切片、多方法对比、图像放大及下载，直接读取现有运行结果。
+
 从 [实际采集数据](../data/spen_acquired_260915/README.md) 中的 Bruker `rawdata.job0` / `fid` 直接读取信号，逐扫描、逐 slice、逐 volume、逐 echo 运行传统重建。原始数据保持不变，结果保存在本项目 `runs/`。
 
 **[浏览全部层面](runs/all_raw_260915/index.html)** · [逐扫描和逐帧结果](runs/all_raw_260915/summary.json) · [独立核验](runs/all_raw_260915/verification.json) · [全帧 CSV](runs/all_raw_260915/frame_index.csv)
